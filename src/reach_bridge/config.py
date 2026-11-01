@@ -47,6 +47,7 @@ class Settings:
     state_dir: Path | None = None
     upstream_python: str | None = None
     admin_timeout: float = 900
+    browser_enabled: bool = True
 
     def __post_init__(self) -> None:
         if len(self.token) < 32 or not self.token.isascii() or any(c.isspace() for c in self.token):
@@ -102,6 +103,8 @@ class Settings:
             else None,
             upstream_python=os.environ.get("REACH_BRIDGE_UPSTREAM_PYTHON") or None,
             admin_timeout=float(os.environ.get("REACH_BRIDGE_ADMIN_TIMEOUT", "900")),
+            browser_enabled=os.environ.get("REACH_BRIDGE_BROWSER_ENABLED", "true").lower()
+            == "true",
         )
 
     def policies(self) -> dict[str, ChannelPolicy]:

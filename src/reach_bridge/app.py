@@ -136,7 +136,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="Reach-Bridge",
-        version="0.2.0",
+        version="0.2.1",
         lifespan=lifespan,
         docs_url=None,
         redoc_url=None,

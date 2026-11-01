@@ -12,6 +12,9 @@ def main():
     if not command:
         print("缺少容器启动命令", file=sys.stderr)
         return 2
+    if os.environ.get("REACH_BRIDGE_BROWSER_ENABLED", "true").lower() != "true":
+        # 原生模式无需显示服务，保留原命令的退出码和信号语义。
+        os.execvp(command[0], command)
     display = os.environ.get("DISPLAY", ":99")
     if not display.startswith(":") or not display[1:].isdigit():
         print("DISPLAY 须为容器内本地显示编号，例如 :99", file=sys.stderr)

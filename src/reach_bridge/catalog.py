@@ -31,6 +31,19 @@ READ_ACTIONS = frozenset(
         "hot_stocks",
     }
 )
+# 固定上游 1.6.1 的原生路径；不从 Cookie 是否存在推断浏览器依赖。
+NATIVE_ACTIONS = {
+    "github": {"search", "read"},
+    "youtube": {"read", "search", "subtitle", "transcribe"},
+    "bilibili": {"search", "read", "hot", "subtitle"},
+    "v2ex": {"hot", "node", "read", "user"},
+    "web": {"search", "read"},
+    "xiaoyuzhou": {"transcribe"},
+    "xueqiu": {"quote", "search"},
+}
+NATIVE_INSTALL = {"github", "youtube", "bilibili", "v2ex", "web", "xiaoyuzhou"}
+
+
 DEFAULT_HOSTS = {
     "github": ["github.com"],
     "bilibili": ["www.bilibili.com", "bilibili.com"],
@@ -106,6 +119,8 @@ class Catalog:
         allowed = (
             READ_ACTIONS if row is None or row.actions is None else READ_ACTIONS & set(row.actions)
         )
+        if not self.settings.browser_enabled:
+            allowed = allowed & NATIVE_ACTIONS.get(name, set())
         return [a for a in self.channels[name]["actions"] if a["name"] in allowed]
 
     def describe(self, *, admin: bool = False) -> dict:
@@ -120,6 +135,7 @@ class Catalog:
                     "name": name,
                     "description": channel["description"],
                     "enabled": policy is not None and policy.enabled,
+                    "can_install": self.settings.browser_enabled or name in NATIVE_INSTALL,
                     "actions": [a["name"] for a in actions],
                     "action_schemas": [
                         {
@@ -140,7 +156,11 @@ class Catalog:
                     "login": channel.get("login"),
                 }
             )
-        return {"agent_reach_version": self.version, "channels": rows}
+        return {
+            "agent_reach_version": self.version,
+            "browser_enabled": self.settings.browser_enabled,
+            "channels": rows,
+        }
 
     def set_policy(self, name: str, policy: ChannelPolicy):
         if name not in self.channels:
@@ -166,6 +186,10 @@ class Catalog:
             or not self.policies[platform].enabled
         ):
             raise BridgeError("FORBIDDEN", "未启用该平台", 403)
+        if not self.settings.browser_enabled and action not in NATIVE_ACTIONS.get(platform, set()):
+            raise BridgeError(
+                "BROWSER_DISABLED", "当前部署已禁用浏览器，请在支持浏览器的执行端调用该动作", 503
+            )
         for row in self.actions(platform):
             if row["name"] == action:
                 return row

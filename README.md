@@ -18,7 +18,7 @@ docker compose --env-file .env --env-file upstream.env up -d --no-build --wait
 
 默认仅绑定 `127.0.0.1:8080`，适合反向代理提供 HTTPS。需要私网直连时修改 `REACH_BRIDGE_BIND` 和 `REACH_BRIDGE_PORT`，并限制宿主入站访问。不要把明文 HTTP 暴露到公网。
 
-固定镜像：`ghcr.io/jaxsonwang/reach-bridge:0.2.0-agent-reach-1.6.1`。发布包同时提供分架构 `.tar.gz` 离线镜像，可用 `docker load -i <镜像文件>` 导入后跳过 `pull`。
+固定镜像：`ghcr.io/jaxsonwang/reach-bridge:0.2.1-agent-reach-1.6.1`。发布包同时提供分架构 `.tar.gz` 离线镜像，可用 `docker load -i <镜像文件>` 导入后跳过 `pull`。
 
 ### 启用 WebUI 管理
 
@@ -50,6 +50,20 @@ REACH_BRIDGE_ALLOW_INSECURE_HTTP=true
 平台的认证方式由上游决定：GitHub 使用 Token；哔哩哔哩 Cookie 验证后写入原生 bili-cli 凭据；YouTube Cookie 写入 yt-dlp 的 Netscape 文件及配置；其他受支持网站复用上游专用浏览器会话。不会导出凭据，也不会挂载你的个人浏览器资料。YouTube 已有自定义 yt-dlp 配置冲突时返回 `CONFIG_CONFLICT`，需要管理员处理，不覆盖已有配置。
 
 “已保存”不等于登录验证成功或拥有平台全部能力。Cookie 可能过期，平台也可能限流、要求验证或限制内容；通过实际动作验收。上游实验性渠道仍保留实验性限制。
+
+### 无浏览器模式
+
+宿主内核不能支持 Chromium sandbox，或只需要原生工具时，在 `.env` 设置：
+
+```dotenv
+REACH_BRIDGE_BROWSER_ENABLED=false
+```
+
+此模式保留 WebUI、API 凭据和哔哩哔哩 / YouTube 的原生 Cookie 导入，允许 GitHub、哔哩哔哩、YouTube、V2EX、Web、小宇宙的原生动作，以及雪球 `quote` / `search`。转录仍需对应 Key 和服务额度。小红书、X / Twitter 等浏览器动作返回 `BROWSER_DISABLED`，不会因为存在 Cookie 就尝试启动浏览器，也不会偷偷改走公开网页后端；通用公开搜索可继续使用既有 SearXNG 或 Web 渠道。
+
+渠道策略和已有凭据会保留，控制台只列出当前模式可执行的动作。网页登录及浏览器 Cookie 导入关闭；“准备依赖”仅允许原生渠道，雪球查询无需先执行会准备浏览器的 `add xueqiu`。原生模式的雪球验证仅运行 `check xueqiu --search`，不触发社区浏览器路径。
+
+该开关约束桥接服务的调用路径；管理员在容器终端手动执行的上游命令不受它控制。启用浏览器的默认模式保持不变，在支持的主机上设回 `true` 并使用所需 seccomp 配置即可。
 
 ### 从 0.1 升级
 

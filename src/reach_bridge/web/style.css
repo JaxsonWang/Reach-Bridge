@@ -1183,3 +1183,9 @@ dialog::backdrop {
     flex-wrap: wrap;
   }
 }
+
+.native-notice {
+  background: #eaf4ed;
+  border: 1px solid #d2e6d8;
+  color: #426b51;
+}

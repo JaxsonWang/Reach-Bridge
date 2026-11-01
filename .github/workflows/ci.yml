@@ -88,6 +88,23 @@ jobs:
           done
           curl --fail-with-body http://127.0.0.1:8080/readyz
           curl --fail-with-body http://127.0.0.1:8080/v1/channels -H "Authorization: Bearer $token"
+      - name: 验证真实原生模式、依赖安装与凭据管理
+        timeout-minutes: 15
+        run: |
+          token=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
+          admin=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
+          echo "::add-mask::$token"
+          echo "::add-mask::$admin"
+          docker run -d --name reach-bridge-native-test \
+            -e REACH_BRIDGE_TOKEN="$token" \
+            -e REACH_BRIDGE_ADMIN_TOKEN="$admin" \
+            -e REACH_BRIDGE_BROWSER_ENABLED=false \
+            -e REACH_BRIDGE_ADMIN_ORIGIN=http://127.0.0.1:8080 \
+            -e REACH_BRIDGE_ALLOW_INSECURE_HTTP=true \
+            -e REACH_BRIDGE_ADMIN_TIMEOUT=300 \
+            --mount "type=bind,src=$PWD/scripts/native_smoke.py,dst=/tmp/native_smoke.py,readonly" \
+            reach-bridge:test python /tmp/native_smoke.py serve
+          docker exec reach-bridge-native-test python /tmp/native_smoke.py check
       - name: 验证真实 Chromium、扩展与登录画布
         timeout-minutes: 20
         run: |
@@ -132,6 +149,9 @@ jobs:
         run: |
           if docker container inspect reach-bridge-test >/dev/null 2>&1; then
             docker rm -f reach-bridge-test
+          fi
+          if docker container inspect reach-bridge-native-test >/dev/null 2>&1; then
+            docker rm -f reach-bridge-native-test
           fi
           if docker container inspect reach-bridge-browser-test >/dev/null 2>&1; then
             docker rm -f reach-bridge-browser-test

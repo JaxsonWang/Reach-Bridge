@@ -15,7 +15,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
-from .catalog import AccessGate, Catalog
+from .catalog import NATIVE_ACTIONS, NATIVE_INSTALL, AccessGate, Catalog
 from .config import ChannelPolicy, Settings
 from .runner import BridgeError, Runner
 
@@ -153,6 +153,20 @@ class Manager:
             raise BridgeError(code, "上游管理操作未完成，请检查渠道依赖与出站网络", 424)
         return result.get("result") or result
 
+    def require_browser(self):
+        if not self.settings.browser_enabled:
+            raise BridgeError(
+                "BROWSER_DISABLED", "当前部署已禁用浏览器，请使用原生 Cookie 或其他执行端", 503
+            )
+
+    def authentication_capabilities(self, description: dict) -> dict:
+        if not self.settings.browser_enabled:
+            for name, capability in description.get("channels", {}).items():
+                capability["login"] = False
+                capability["cookie_import"] = name in {"bilibili", "youtube"}
+        description["browser_enabled"] = self.settings.browser_enabled
+        return description
+
     def check_channel(self, platform: str):
         if platform not in self.catalog.channels:
             raise BridgeError("BAD_INPUT", "未知渠道", 422)
@@ -227,6 +241,7 @@ class Manager:
                 self.active = None
 
     async def login(self, job: dict):
+        self.require_browser()
         try:
             async with self.browser_lock:
                 job.update(message="正在准备浏览器、扩展与渠道依赖")
@@ -249,6 +264,7 @@ class Manager:
                 pass
 
     def login_job(self, owner: str) -> dict:
+        self.require_browser()
         job = self.active
         if (
             not job
@@ -269,9 +285,10 @@ def mount_admin(app, settings: Settings, runner: Runner, catalog: Catalog, gate:
     async def bootstrap():
         return {
             "enabled": bool(settings.admin_token),
+            "browser_enabled": settings.browser_enabled,
             "origin": auth.origin,
             "insecure_http": settings.allow_insecure_http,
-            "version": "0.2.0",
+            "version": "0.2.1",
         }
 
     @router.post("/login")
@@ -282,7 +299,7 @@ def mount_admin(app, settings: Settings, runner: Runner, catalog: Catalog, gate:
                 "csrf": session.csrf,
                 "origin": auth.origin,
                 "insecure_http": settings.allow_insecure_http,
-                "version": "0.2.0",
+                "version": "0.2.1",
             }
         )
         response.set_cookie(
@@ -312,7 +329,7 @@ def mount_admin(app, settings: Settings, runner: Runner, catalog: Catalog, gate:
             "csrf": auth.sessions[key].csrf,
             "origin": auth.origin,
             "insecure_http": settings.allow_insecure_http,
-            "version": "0.2.0",
+            "version": "0.2.1",
         }
 
     @router.get("/api/channels")
@@ -333,7 +350,7 @@ def mount_admin(app, settings: Settings, runner: Runner, catalog: Catalog, gate:
         if manager.active:
             return {"capabilities": manager.authentication, "busy": True}
         async with gate.manage():
-            description = await manager.helper("describe")
+            description = manager.authentication_capabilities(await manager.helper("describe"))
             manager.authentication = description
             state = await manager.helper("credentials_status")
         return {"capabilities": description, "status": state, "busy": False}
@@ -369,10 +386,14 @@ def mount_admin(app, settings: Settings, runner: Runner, catalog: Catalog, gate:
     async def install(body: ChannelInput, request: Request):
         key = auth.require(request)
         manager.check_channel(body.platform)
+        if not settings.browser_enabled and body.platform not in NATIVE_INSTALL:
+            raise BridgeError(
+                "BROWSER_DISABLED", "该渠道的依赖准备需要浏览器；原生报价和搜索可直接测试", 503
+            )
 
         async def operation(job):
             capability = (await manager.helper("describe"))["channels"].get(body.platform, {})
-            if capability.get("login"):
+            if settings.browser_enabled and capability.get("login"):
                 await manager.helper("browser_prepare", body.platform)
             return await manager.cli(["add", body.platform])
 
@@ -383,6 +404,11 @@ def mount_admin(app, settings: Settings, runner: Runner, catalog: Catalog, gate:
         key = auth.require(request)
         manager.check_channel(body.platform)
         actions = {row["name"] for row in catalog.channels[body.platform]["actions"]}
+        if not settings.browser_enabled and not actions <= NATIVE_ACTIONS.get(body.platform, set()):
+            if "search" not in NATIVE_ACTIONS.get(body.platform, set()):
+                manager.require_browser()
+            # check --search 只跑搜索；不能让原生模式的雪球验证触发社区浏览器路径。
+            actions = {"search"}
         if actions == {"transcribe"}:
             raise BridgeError("MANUAL_TEST", "请在操作台提供链接测试转录，不自动上传样本", 422)
 
@@ -420,6 +446,8 @@ def mount_admin(app, settings: Settings, runner: Runner, catalog: Catalog, gate:
     async def cookies(body: CookieInput, request: Request):
         key = auth.require(request)
         manager.check_channel(body.platform)
+        if not settings.browser_enabled and body.platform not in {"bilibili", "youtube"}:
+            manager.require_browser()
         raw = body.cookies.get_secret_value().strip()
         if not raw or len(raw) > 120000:
             raise BridgeError("BAD_INPUT", "Cookie 内容为空或过长", 422)
@@ -447,6 +475,7 @@ def mount_admin(app, settings: Settings, runner: Runner, catalog: Catalog, gate:
     async def browser_login(body: ChannelInput, request: Request):
         key = auth.require(request)
         manager.check_channel(body.platform)
+        manager.require_browser()
         return manager.start(key, "login", body.platform, manager.login)
 
     @router.post("/api/login/finish")
@@ -481,6 +510,8 @@ def mount_admin(app, settings: Settings, runner: Runner, catalog: Catalog, gate:
     async def logout_platform(body: ChannelInput, request: Request):
         key = auth.require(request)
         manager.check_channel(body.platform)
+        if not settings.browser_enabled and body.platform != "bilibili":
+            manager.require_browser()
 
         async def operation(job):
             return await manager.cli(["logout", body.platform])

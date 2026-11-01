@@ -53,6 +53,7 @@ const actionNames = {
 };
 const state = {
   csrf: "",
+  browserEnabled: true,
   channels: [],
   selected: "",
   view: "channels",
@@ -127,11 +128,13 @@ async function enter(session) {
 async function refreshChannels() {
   const data = await api("/admin/api/channels");
   state.channels = data.channels;
+  state.browserEnabled = data.browser_enabled !== false;
+  $("native-banner").classList.toggle("hidden", state.browserEnabled);
   $("upstream-version").textContent = data.agent_reach_version;
   $("total-count").textContent = `共 ${data.channels.length} 个渠道`;
   $("channel-total").textContent = data.channels.length;
   $("enabled-count").textContent = data.channels.filter(
-    (c) => c.enabled,
+    (c) => c.enabled && c.actions.length,
   ).length;
   $("action-count").textContent = data.channels
     .filter((c) => c.enabled)
@@ -145,6 +148,8 @@ function statusFor(channel) {
   const current = state.doctor[channel.name];
   const saved = state.credentials.channels?.[channel.name];
   if (!channel.enabled) return ["未开放", ""];
+  if (!state.browserEnabled && !channel.actions.length)
+    return ["浏览器已禁用", "amber"];
   if (["ready", "verified", "search_ready"].includes(current?.status))
     return ["最近验证通过", "green"];
   if (current?.status === "needs_setup" || current?.status === "not_added")
@@ -254,14 +259,18 @@ function renderDetail() {
   scope.append(hosts);
   panel.append(scope);
   const actions = el("div", "detail-actions");
+  const install = button("准备依赖", "secondary", () =>
+    startJob("/admin/api/install", { platform: channel.name }),
+  );
+  install.disabled = channel.can_install === false;
+  const verify = button("验证能力", "quiet", () =>
+    startJob("/admin/api/verify", { platform: channel.name }),
+  );
+  verify.disabled = !channel.actions.length;
   actions.append(
     button("配置策略", "secondary", () => openPolicy(channel)),
-    button("准备依赖", "secondary", () =>
-      startJob("/admin/api/install", { platform: channel.name }),
-    ),
-    button("验证能力", "quiet", () =>
-      startJob("/admin/api/verify", { platform: channel.name }),
-    ),
+    install,
+    verify,
     button("凭据与登录 ↗", "quiet", () => {
       setView("credentials");
       $("credential-channel").value = channel.name;
@@ -339,7 +348,7 @@ function populateSelects() {
     const previous = $(id).value;
     $(id).replaceChildren();
     for (const channel of state.channels.filter(
-      (c) => id !== "action-channel" || c.enabled,
+      (c) => id !== "action-channel" || (c.enabled && c.action_schemas.length),
     )) {
       const option = el("option", "", names[channel.name] || channel.name);
       option.value = channel.name;
@@ -376,7 +385,9 @@ function renderCredentialState() {
     : "未发现已保存会话";
   $("cookie-support").textContent = auth.cookie_import
     ? "可导入本平台 Cookie。授权域：" + (auth.domains || []).join("、")
-    : "此平台未提供 Cookie 导入；使用对应的 API 凭据或公开内容能力。";
+    : !state.browserEnabled && !["bilibili", "youtube"].includes(platform)
+      ? "当前原生模式不支持此平台的浏览器会话导入，请在支持浏览器的执行端配置。"
+      : "此平台未提供 Cookie 导入；使用对应的 API 凭据或公开内容能力。";
   $("cookie-value").disabled = !auth.cookie_import;
   $("import-cookie").disabled = !auth.cookie_import;
   $("open-login").disabled = !auth.login;
