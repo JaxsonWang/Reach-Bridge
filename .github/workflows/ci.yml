@@ -88,6 +88,19 @@ jobs:
           done
           curl --fail-with-body http://127.0.0.1:8080/readyz
           curl --fail-with-body http://127.0.0.1:8080/v1/channels -H "Authorization: Bearer $token"
+          docker exec reach-bridge-test python -c '
+          from pathlib import Path
+          names = []
+          for process in Path("/proc").iterdir():
+              if process.name.isdigit():
+                  try:
+                      names.append((process / "comm").read_text().strip())
+                  except FileNotFoundError:
+                      pass
+          assert not any(name in {"Xvfb", "chromium", "chrome"} for name in names), names
+          print("默认服务已就绪，空闲无 Xvfb/Chromium：", names)
+          '
+          docker stats --no-stream reach-bridge-test
       - name: 验证真实原生模式、依赖安装与凭据管理
         timeout-minutes: 15
         run: |

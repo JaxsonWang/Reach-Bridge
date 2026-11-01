@@ -1,7 +1,7 @@
 name: reach-bridge
 services:
   reach-bridge:
-    image: ghcr.io/jaxsonwang/reach-bridge:${REACH_BRIDGE_VERSION:-0.3.0}-agent-reach-${AGENT_REACH_VERSION:?请加载 upstream.env}
+    image: ghcr.io/jaxsonwang/reach-bridge:${REACH_BRIDGE_VERSION:-0.3.1}-agent-reach-${AGENT_REACH_VERSION:?请加载 upstream.env}
     init: true
     restart: unless-stopped
     user: "${PUID:-1000}:${PGID:-1000}"

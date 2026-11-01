@@ -9,6 +9,7 @@ import sqlite3
 import struct
 import subprocess
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -404,6 +405,37 @@ def test_selected_system_browser_is_preserved(monkeypatch, upstream, tmp_path):
     monkeypatch.setenv("REACH_BRIDGE_BROWSER_EXECUTABLE", "/another/chromium")
     admin.select_system_browser(upstream)
     assert not upstream.calls
+
+
+def test_old_official_chromium_uses_on_demand_launcher_in_standard_mode(
+    monkeypatch, upstream, tmp_path
+):
+    launcher = tmp_path / "reach-bridge-chromium"
+    launcher.touch()
+    launcher.chmod(0o755)
+    upstream.browser._load_state = lambda: {"backend": "chrome", "executable": "/usr/bin/chromium"}
+    monkeypatch.setenv("REACH_BRIDGE_BROWSER_EXECUTABLE", str(launcher))
+    monkeypatch.setenv("REACH_BRIDGE_BROWSER_SANDBOX", "true")
+    is_file, access = Path.is_file, os.access
+    monkeypatch.setattr(
+        Path, "is_file", lambda path: str(path) == "/usr/bin/chromium" or is_file(path)
+    )
+    monkeypatch.setattr(
+        os, "access", lambda path, mode: path == "/usr/bin/chromium" or access(path, mode)
+    )
+    stopped = []
+    upstream.browser.stop = lambda: stopped.append(True) or True
+    admin.select_system_browser(upstream)
+    assert stopped == [True]
+    assert upstream.calls[0] == (
+        "state",
+        {
+            "backend": "chrome",
+            "executable": str(launcher),
+            "launcher_python": None,
+            "fallback_reason": None,
+        },
+    )
 
 
 def test_error_envelope_does_not_echo_exception_or_upstream_output(monkeypatch, upstream):

@@ -1,6 +1,6 @@
 [project]
 name = "reach-bridge"
-version = "0.3.0"
+version = "0.3.1"
 description = "供受限终端环境调用的 Agent-Reach 只读 HTTP 桥接服务"
 readme = "README.md"
 requires-python = ">=3.12"

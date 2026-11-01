@@ -299,6 +299,7 @@ def browser_diagnostics(upstream, directory):
 
 
 def exercise(helper, upstream, channel):
+    assert not displays(), "空闲容器不应常驻 Xvfb"
     print("准备系统 Chromium、OpenCLI 与扩展", flush=True)
     helper.execute("browser_prepare", channel.name, {}, upstream)
     state = upstream.browser._load_state()
@@ -307,8 +308,10 @@ def exercise(helper, upstream, channel):
         and state["executable"] == os.environ["REACH_BRIDGE_BROWSER_EXECUTABLE"]
     )
     assert upstream.browser.status()["opencli_connected"] is True
+    assert not displays(), "无头浏览器准备不应启动 Xvfb"
     print("打开受控 HTTPS 登录画布", flush=True)
     opened = helper.execute("browser_login", channel.name, {}, upstream)
+    assert len(displays()) == 1, "可见登录浏览器应有一个按需 Xvfb"
     target_id = opened["target_id"]
     ready = upstream.browser.wait_for(
         lambda: evaluate(
@@ -382,6 +385,59 @@ def exercise(helper, upstream, channel):
     assert all(("--no-sandbox" in command) == (sandbox == "false") for command in commands)
     print("BROWSER_SANDBOX=" + sandbox + "; 已核对实际 Chromium 进程参数", flush=True)
     print("已验证：扩展连接、HTTPS 页面、1280x800 PNG、点击、输入、按键、滚动、刷新", flush=True)
+    assert upstream.browser.stop(), "正常关闭浏览器失败"
+    assert upstream.browser.wait_for(lambda: not displays(), 10), "正常关闭后 Xvfb 未释放"
+    assert upstream.browser.wait_for(lambda: not upstream.browser.watcher_running(), 20)
+    exercise_display_cleanup(upstream)
+    helper.execute("browser_prepare", channel.name, {}, upstream)
+    assert upstream.browser.status()["opencli_connected"] is True
+    assert not displays(), "重新打开无头浏览器不应留下 Xvfb"
+    print("已验证：空闲/无头无Xvfb、可见按需显示、正常/pipe EOF/强杀后释放及重新打开", flush=True)
+
+
+def displays():
+    result = []
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            name = (entry / "comm").read_text().strip()
+            status = (entry / "status").read_text()
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        if name == "Xvfb" and "State:\tZ" not in status:
+            result.append(int(entry.name))
+    return result
+
+
+def exercise_display_cleanup(upstream):
+    watcher = importlib.import_module("agent_reach.runtime.browser_watcher")
+    for force in (False, True):
+        process = connection = None
+        try:
+            process, connection = watcher._launch_with_pipe(
+                os.environ["REACH_BRIDGE_BROWSER_EXECUTABLE"], "about:blank", headless=False
+            )
+            version = connection.call("Browser.getVersion", timeout=15)
+            assert version and "result" in version, "直接 pipe 启动失败"
+            display_pids = displays()
+            assert len(display_pids) == 1
+            parent = next(
+                line.split()[1]
+                for line in Path(f"/proc/{display_pids[0]}/status").read_text().splitlines()
+                if line.startswith("PPid:")
+            )
+            assert int(parent) == process.pid, "Xvfb 必须绑定 watcher 管理的真实 Chromium PID"
+            if force:
+                process.kill()
+            connection.close()
+            process.wait(timeout=15)
+            assert upstream.browser.wait_for(lambda: not displays(), 10), "浏览器退出遗留 Xvfb"
+        finally:
+            if connection is not None:
+                connection.close()
+            if process is not None:
+                stop_diagnostic_process(process)
 
 
 def main():

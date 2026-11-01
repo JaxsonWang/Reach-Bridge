@@ -440,12 +440,15 @@ def select_system_browser(upstream):
     previous = current.get("executable")
     selected = os.environ.get("REACH_BRIDGE_BROWSER_EXECUTABLE", "")
     compatibility = os.environ.get("REACH_BRIDGE_BROWSER_SANDBOX", "true") == "false"
+    # 旧镜像曾全局提供 DISPLAY；升级后系统 Chromium 也须经过按需显示入口。
+    legacy_system = previous == "/usr/bin/chromium" and bool(selected) and previous != selected
     if (
         current.get("backend") == "chrome"
         and isinstance(previous, str)
         and Path(previous).is_file()
         and os.access(previous, os.X_OK)
         and (not compatibility or previous == selected)
+        and not legacy_system
     ):
         return
     require(

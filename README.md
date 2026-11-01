@@ -18,7 +18,7 @@ docker compose --env-file .env --env-file upstream.env up -d --no-build --wait
 
 默认仅绑定 `127.0.0.1:8080`，适合反向代理提供 HTTPS。需要私网直连时修改 `REACH_BRIDGE_BIND` 和 `REACH_BRIDGE_PORT`，并限制宿主入站访问。不要把明文 HTTP 暴露到公网。
 
-固定镜像：`ghcr.io/jaxsonwang/reach-bridge:0.3.0-agent-reach-1.6.1`。发布包同时提供分架构 `.tar.gz` 离线镜像，可用 `docker load -i <镜像文件>` 导入后跳过 `pull`。
+固定镜像：`ghcr.io/jaxsonwang/reach-bridge:0.3.1-agent-reach-1.6.1`。发布包同时提供分架构 `.tar.gz` 离线镜像，可用 `docker load -i <镜像文件>` 导入后跳过 `pull`。
 
 ### 启用 WebUI 管理
 
@@ -82,6 +82,21 @@ REACH_BRIDGE_BROWSER_ENABLED=false
 渠道策略和已有凭据会保留，控制台只列出当前模式可执行的动作。网页登录及浏览器 Cookie 导入关闭；“准备依赖”仅允许原生渠道，雪球查询无需先执行会准备浏览器的 `add xueqiu`。原生模式的雪球验证仅运行 `check xueqiu --search`，不触发社区浏览器路径。
 
 该开关约束桥接服务的调用路径；管理员在容器终端手动执行的上游命令不受它控制。启用浏览器的默认模式保持不变，在支持的主机上设回 `true` 并使用所需 seccomp 配置即可。
+
+### 空闲内存与按需显示
+
+0.3.1 起，官方 Chromium 在空闲服务与无头查询时不启动 Xvfb；网页登录需要可见画面时才创建 1280×800 显示服务，随该浏览器退出释放。默认服务也不再保留 Python 入口监督进程。上游浏览器的 600 秒空闲回收、管理登录时限与会话保存方式不变；关闭 WebUI 弹窗不等于立即关闭共享浏览器。
+
+已有部署选中的官方 `/usr/bin/chromium` 会在容器启动时切换到内置统一入口，不清除专用 profile 或凭据，手动 CLI 和 WebUI 无需先重新准备。标准模式下已有自定义浏览器仍保留原可执行文件选择及共享显示环境，不强制迁移；这类部署仍可能有常驻 Xvfb。
+
+在 NAS 上检查实际进程，而不只看容器总内存：
+
+```sh
+docker stats --no-stream <容器名>
+docker top <容器名> -eo pid,ppid,comm,rss,pcpu
+```
+
+`docker top` 的 RSS 单位为 KiB，包含共享映射，不能简单相加作为容器总量。Linux 下 Docker CLI 会扣除部分非活跃文件缓存，但活跃文件缓存仍可能计入显示值；高读数不一定是 Python 匿名内存增长。`shm_size: 512m` 是容量上限，不是预先占用。默认部署更新后可检查空闲时不再存在 Xvfb；实际内存降幅取决于进程和文件缓存，不能用旧 Xvfb 的 RSS 直接推算。不清理宿主缓存，不自动添加内存硬限制。
 
 ### 从 0.1 升级
 
