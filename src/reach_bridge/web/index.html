@@ -85,8 +85,8 @@
       </section>
       <div id="workspace" class="workspace hidden">
         <div id="native-banner" class="notice native-notice hidden">
-          原生模式：浏览器已禁用。可配置 API 凭据及哔哩哔哩 / YouTube
-          Cookie；浏览器渠道请在支持的执行端使用。
+          原生模式：B 站扫码登录、Cookie 与 API
+          凭据管理不需要浏览器。其他浏览器渠道请在支持的执行端使用。
         </div>
         <div
           id="browser-compat-banner"
@@ -254,6 +254,8 @@
                 <div class="form-actions wrap">
                   <button id="import-cookie" class="primary" type="submit">
                     导入 Cookie</button
+                  ><button id="open-qr" class="primary hidden" type="button">
+                    准备并扫码登录</button
                   ><button id="open-login" class="secondary" type="button">
                     准备并登录 ↗</button
                   ><button id="clear-cookie" class="danger-quiet" type="button">
@@ -344,6 +346,32 @@
           ><button type="button" class="secondary close-dialog">取消</button>
         </div>
       </form>
+    </dialog>
+    <dialog id="qr-dialog" class="qr-dialog">
+      <div class="dialog-heading">
+        <div>
+          <span class="eyebrow">BILIBILI · NATIVE LOGIN</span>
+          <h2>B 站扫码登录</h2>
+        </div>
+        <button id="cancel-qr" class="icon-button" aria-label="关闭二维码登录">
+          ×
+        </button>
+      </div>
+      <p class="muted">
+        使用哔哩哔哩 App 扫码，并在手机上确认。无需 NAS 运行浏览器。
+      </p>
+      <div class="qr-canvas">
+        <img id="qr-image" alt="B 站官方登录二维码" class="hidden" />
+      </div>
+      <p id="qr-status" class="qr-status" role="status">
+        正在准备原生登录组件…
+      </p>
+      <div class="form-actions">
+        <button id="retry-qr" class="secondary hidden">重新生成二维码</button>
+      </div>
+      <p class="field-help">
+        确认后自动验证并保存到服务端。二维码仅供本人使用；取消不会撤回网站侧已确认的授权。
+      </p>
     </dialog>
     <dialog id="browser-dialog" class="browser-dialog">
       <div class="dialog-heading">

@@ -62,6 +62,7 @@ const state = {
   doctor: {},
   jobs: [],
   loginJob: null,
+  qrJob: null,
   frameBusy: false,
 };
 let toastTimer;
@@ -107,6 +108,9 @@ async function api(path, { method = "GET", body } = {}) {
 function showLogin() {
   state.csrf = "";
   state.loginJob = null;
+  state.qrJob = null;
+  $("qr-image").removeAttribute("src");
+  if ($("qr-dialog").open) $("qr-dialog").close();
   $("workspace").classList.add("hidden");
   $("login-view").classList.remove("hidden");
   $("logout").classList.add("hidden");
@@ -410,6 +414,8 @@ function renderCredentialState() {
   $("cookie-value").disabled = !auth.cookie_import;
   $("import-cookie").disabled = !auth.cookie_import;
   $("open-login").disabled = !auth.login;
+  $("open-login").classList.toggle("hidden", !auth.login);
+  $("open-qr").classList.toggle("hidden", !auth.native_qr);
   $("clear-cookie").disabled = !auth.cookie_import && !auth.login;
 }
 async function startJob(path, body, openBrowser = false) {
@@ -453,6 +459,7 @@ async function refreshJobs() {
       cookies: "导入 Cookie",
       cookie_delete: "清除 Cookie",
       login: "平台登录",
+      qr_login: "扫码登录",
       logout: "退出平台",
     };
     text.append(
@@ -492,6 +499,8 @@ async function refreshJobs() {
             .catch((e) => toast(e.message, true)),
         ),
       );
+    if (!done && job.kind === "qr_login")
+      actions.append(button("查看二维码", "quiet", () => showQr(job)));
     row.append(text, actions);
     list.append(row);
     if (
@@ -506,6 +515,28 @@ async function refreshJobs() {
       }
       if (job.kind !== "status")
         refreshCredentials().catch((e) => toast(e.message, true));
+    }
+    if (job.id === state.qrJob) {
+      $("qr-status").textContent = job.message;
+      if (
+        job.state === "waiting_user" &&
+        $("qr-image").dataset.job !== job.id
+      ) {
+        $("qr-image").src =
+          `/admin/api/qr-login/${encodeURIComponent(job.id)}/image`;
+        $("qr-image").dataset.job = job.id;
+        $("qr-image").classList.remove("hidden");
+      }
+      if (done) {
+        state.qrJob = null;
+        $("qr-image").removeAttribute("src");
+        $("qr-image").classList.add("hidden");
+        $("retry-qr").classList.toggle("hidden", job.state === "succeeded");
+        if (job.state === "succeeded") {
+          $("qr-dialog").close();
+          toast("B 站登录已验证并保存");
+        }
+      }
     }
     if (job.id === state.loginJob) {
       if (job.state === "waiting_user") refreshFrame();
@@ -681,6 +712,48 @@ $("cookie-form").addEventListener("submit", (event) => {
     platform: $("credential-channel").value,
     cookies,
   });
+});
+function showQr(job) {
+  state.qrJob = job.id;
+  $("qr-status").textContent = job.message;
+  $("qr-image").removeAttribute("src");
+  $("qr-image").classList.add("hidden");
+  delete $("qr-image").dataset.job;
+  $("retry-qr").classList.add("hidden");
+  if (!$("qr-dialog").open) $("qr-dialog").showModal();
+  refreshJobs().catch((e) => toast(e.message, true));
+}
+async function startQr() {
+  const button = $("open-qr");
+  button.disabled = true;
+  $("retry-qr").disabled = true;
+  try {
+    const job = await startJob("/admin/api/qr-login", { platform: "bilibili" });
+    if (job) showQr(job);
+  } finally {
+    button.disabled = false;
+    $("retry-qr").disabled = false;
+  }
+}
+async function cancelQr() {
+  if (state.qrJob)
+    await api(`/admin/api/jobs/${state.qrJob}/cancel`, {
+      method: "POST",
+      body: {},
+    });
+  state.qrJob = null;
+  $("qr-image").removeAttribute("src");
+  $("qr-dialog").close();
+  await refreshJobs();
+}
+$("open-qr").addEventListener("click", startQr);
+$("retry-qr").addEventListener("click", startQr);
+$("cancel-qr").addEventListener("click", () =>
+  cancelQr().catch((e) => toast(e.message, true)),
+);
+$("qr-dialog").addEventListener("cancel", (event) => {
+  event.preventDefault();
+  cancelQr().catch((e) => toast(e.message, true));
 });
 $("open-login").addEventListener("click", () =>
   startJob(

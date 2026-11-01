@@ -794,3 +794,219 @@ def test_frame_rejects_wrong_dimensions_or_format(monkeypatch, upstream, data, e
     code, result, _ = invoke(monkeypatch, upstream, "browser_frame", payload={"target_id": "PAGE1"})
     assert code == 1 and result["error"]["code"] == expected
     assert result["result"] == {}
+
+
+QR_KEY = "a" * 32
+QR_URL = "https://account.bilibili.com/h5/account-h5/auth/scan-web?qrcode_key=" + QR_KEY
+
+
+def test_bili_qr_start_returns_validated_challenge(monkeypatch, upstream, tmp_path):
+    (tmp_path / "python").touch()
+    requested = []
+
+    def http(url, **kwargs):
+        requested.append(url)
+        return {"qrcode_key": QR_KEY, "url": QR_URL}, {}
+
+    monkeypatch.setattr(admin, "bili_qr_http", http)
+    code, result, _ = invoke(monkeypatch, upstream, "bilibili_qr_start", "bilibili")
+    assert code == 0
+    assert result["result"] == {"qrcode_key": QR_KEY, "url": QR_URL, "expires_in": 180}
+    assert requested == [admin.BILI_QR_ROOT + "generate"]
+    assert not upstream.calls
+
+
+@pytest.mark.parametrize(
+    "state,expected", [(86101, "waiting_scan"), (86090, "waiting_confirm"), (86038, "expired")]
+)
+def test_bili_qr_poll_waiting_never_saves(monkeypatch, upstream, state, expected):
+    monkeypatch.setattr(admin, "bili_qr_http", lambda *a, **k: ({"code": state}, {}))
+    monkeypatch.setattr(admin, "save_bili_native", lambda *a: pytest.fail("等待时不能保存凭据"))
+    code, result, text = invoke(
+        monkeypatch, upstream, "bilibili_qr_poll", "bilibili", {"qrcode_key": QR_KEY}
+    )
+    assert code == 0 and result["result"] == {"state": expected}
+    assert QR_KEY not in text and not upstream.calls
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [{}, {"qrcode_key": "https://evil.test"}, {"qrcode_key": QR_KEY, "url": "https://evil.test"}],
+)
+def test_bili_qr_poll_rejects_untrusted_context_before_network(monkeypatch, upstream, payload):
+    monkeypatch.setattr(admin, "bili_qr_http", lambda *a, **k: pytest.fail("无效输入不能联网"))
+    code, result, _ = invoke(monkeypatch, upstream, "bilibili_qr_poll", "bilibili", payload)
+    assert code == 1 and result["error"]["code"] == "BAD_INPUT"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://evil.test/scan?qrcode_key=" + QR_KEY,
+        QR_URL.replace(QR_KEY, "b" * 32),
+        QR_URL + "&qrcode_key=second",
+    ],
+)
+def test_bili_qr_start_rejects_wrong_origin_and_key(monkeypatch, upstream, tmp_path, url):
+    (tmp_path / "python").touch()
+    monkeypatch.setattr(
+        admin, "bili_qr_http", lambda *a, **k: ({"qrcode_key": QR_KEY, "url": url}, {})
+    )
+    code, result, _ = invoke(monkeypatch, upstream, "bilibili_qr_start", "bilibili")
+    assert code == 1 and result["error"]["code"] == "QR_FAILED"
+
+
+def test_bili_qr_start_requires_installed_native_writer(monkeypatch, upstream):
+    monkeypatch.setattr(
+        admin, "bili_qr_http", lambda *a, **k: pytest.fail("未安装时不能创建二维码")
+    )
+    code, result, _ = invoke(monkeypatch, upstream, "bilibili_qr_start", "bilibili")
+    assert code == 1 and result["error"]["code"] == "NEED_SETUP"
+
+
+@pytest.mark.parametrize("operation", ["bilibili_qr_start", "bilibili_qr_poll"])
+def test_bili_qr_not_available_for_other_channel(monkeypatch, upstream, operation):
+    monkeypatch.setattr(
+        admin, "bili_qr_http", lambda *a, **k: pytest.fail("其他渠道不能创建B站二维码")
+    )
+    code, result, _ = invoke(
+        monkeypatch,
+        upstream,
+        operation,
+        "github",
+        {"qrcode_key": QR_KEY} if operation.endswith("poll") else {},
+    )
+    assert code == 1 and result["error"]["code"] == "BAD_INPUT"
+
+
+@pytest.mark.parametrize("direct_cookies", [False, True])
+def test_bili_qr_success_verifies_saves_and_marks_native_without_secret_output(
+    monkeypatch, upstream, direct_cookies
+):
+    requested, saved = [], []
+    ticket = "https://passport.biligame.com/x/passport-login/web/crossDomain?ticket=private-ticket"
+    cookies = {"SESSDATA": "private-session", "bili_jct": "private-csrf", "DedeUserID": "123"}
+
+    def http(url, **kwargs):
+        requested.append((url, kwargs))
+        if kwargs.get("ticket"):
+            return {}, cookies.copy()
+        return {
+            "code": 0,
+            "url": ticket,
+            "refresh_token": "private-refresh",
+        }, cookies.copy() if direct_cookies else {}
+
+    monkeypatch.setattr(admin, "bili_qr_http", http)
+    monkeypatch.setattr(admin, "save_bili_native", lambda _up, rows: saved.extend(rows))
+    code, result, text = invoke(
+        monkeypatch, upstream, "bilibili_qr_poll", "bilibili", {"qrcode_key": QR_KEY}
+    )
+    assert code == 0 and result["result"] == {
+        "state": "authenticated",
+        "verified": True,
+        "saved": True,
+    }
+    assert {row["name"]: row["value"] for row in saved} == {
+        **cookies,
+        "ac_time_value": "private-refresh",
+    }
+    assert len(requested) == (1 if direct_cookies else 2)
+    assert upstream.data["session_reuse"]["bilibili"]["source"] == "manual"
+    assert not upstream.calls
+    assert all(
+        secret not in text
+        for secret in [
+            QR_KEY,
+            "private-session",
+            "private-csrf",
+            "private-refresh",
+            "private-ticket",
+        ]
+    )
+
+
+@pytest.mark.parametrize("state", [None, True, 99999, -1])
+def test_bili_qr_unknown_state_is_failure_not_success(monkeypatch, upstream, state):
+    monkeypatch.setattr(admin, "bili_qr_http", lambda *a, **k: ({"code": state}, {}))
+    monkeypatch.setattr(admin, "save_bili_native", lambda *a: pytest.fail("未知状态不能保存"))
+    code, result, _ = invoke(
+        monkeypatch, upstream, "bilibili_qr_poll", "bilibili", {"qrcode_key": QR_KEY}
+    )
+    assert code == 1 and result["error"]["code"] == "QR_FAILED"
+
+
+def test_bili_qr_validation_failure_does_not_mark_or_leak(monkeypatch, upstream):
+    monkeypatch.setattr(
+        admin, "bili_qr_http", lambda *a, **k: ({"code": 0}, {"SESSDATA": "private-session"})
+    )
+
+    def fail(*args):
+        raise admin.AdminError("VERIFICATION_FAILED")
+
+    monkeypatch.setattr(admin, "save_bili_native", fail)
+    code, result, text = invoke(
+        monkeypatch, upstream, "bilibili_qr_poll", "bilibili", {"qrcode_key": QR_KEY}
+    )
+    assert code == 1 and result["error"]["code"] == "VERIFICATION_FAILED"
+    assert "bilibili" not in upstream.data.get("session_reuse", {})
+    assert "private-session" not in text
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://passport.biligame.com/x/passport-login/web/crossDomain",
+        "https://evil.test/x/passport-login/web/crossDomain",
+        "https://passport.biligame.com/other",
+        "https://user@passport.biligame.com/x/passport-login/web/crossDomain",
+        "https://passport.biligame.com:444/x/passport-login/web/crossDomain",
+    ],
+)
+def test_bili_qr_ticket_restricts_exact_https_endpoints(monkeypatch, url):
+    monkeypatch.setattr(admin, "build_opener", lambda *a: pytest.fail("域越界不能联网"))
+    with pytest.raises(admin.AdminError) as caught:
+        admin.bili_qr_http(url, ticket=True)
+    assert caught.value.code == "QR_FAILED"
+
+
+def test_bili_qr_http_reads_ticket_headers_without_following_redirect(monkeypatch):
+    from email.message import Message
+    from urllib.error import HTTPError
+
+    headers = Message()
+    headers.add_header(
+        "Set-Cookie", "SESSDATA=private-session; Domain=.biligame.com; Secure; HttpOnly"
+    )
+    headers.add_header("Set-Cookie", "bili_jct=private-csrf; Path=/")
+    headers.add_header("Location", "https://evil.test/steal")
+    calls = []
+
+    def open_request(request, timeout):
+        calls.append(request.full_url)
+        assert timeout == 15
+        raise HTTPError(request.full_url, 302, "Found", headers, io.BytesIO())
+
+    monkeypatch.setattr(admin, "build_opener", lambda handler: SimpleNamespace(open=open_request))
+    data, cookies = admin.bili_qr_http(
+        "https://passport.biligame.com/x/passport-login/web/crossDomain?ticket=private-ticket",
+        ticket=True,
+    )
+    assert data == {} and cookies == {"SESSDATA": "private-session", "bili_jct": "private-csrf"}
+    assert len(calls) == 1
+    assert (
+        admin.NoQrRedirect().redirect_request(None, None, 302, "", headers, "https://evil.test")
+        is None
+    )
+
+
+def test_bili_qr_network_errors_are_fixed_and_secret_free(monkeypatch, upstream):
+    def fail(request, timeout):
+        raise OSError("private-ticket private-cookie")
+
+    monkeypatch.setattr(admin, "build_opener", lambda *a: SimpleNamespace(open=fail))
+    code, result, text = invoke(
+        monkeypatch, upstream, "bilibili_qr_poll", "bilibili", {"qrcode_key": QR_KEY}
+    )
+    assert code == 1 and result["error"]["code"] == "QR_FAILED"
+    assert "private-ticket" not in text and "private-cookie" not in text and QR_KEY not in text

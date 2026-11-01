@@ -1215,3 +1215,29 @@ dialog::backdrop {
 .cookie-help p {
   margin-top: 8px;
 }
+
+.qr-dialog {
+  width: min(460px, calc(100vw - 32px));
+}
+.qr-canvas {
+  min-height: 280px;
+  display: grid;
+  place-items: center;
+  margin-top: 18px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.qr-canvas img {
+  width: 280px;
+  height: 280px;
+  max-width: 100%;
+  object-fit: contain;
+}
+.qr-status {
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.7;
+  margin-top: 16px;
+  color: var(--green);
+}

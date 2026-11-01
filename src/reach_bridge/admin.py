@@ -11,8 +11,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import qrcode
+import qrcode.image.svg
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from .catalog import NATIVE_ACTIONS, NATIVE_INSTALL, AccessGate, Catalog
@@ -20,6 +22,7 @@ from .config import ChannelPolicy, Settings
 from .runner import BridgeError, Runner
 
 CONFIG_KEYS = {"github-token", "groq-key", "openai-key"}
+QR_POLL_SECONDS = 2
 
 
 @dataclass
@@ -177,7 +180,7 @@ class Manager:
         return {
             key: value
             for key, value in job.items()
-            if key not in ("owner", "event", "target_id", "task")
+            if key not in ("owner", "event", "target_id", "task", "private")
         }
 
     def start(self, owner: str, kind: str, platform: str, operation):
@@ -215,6 +218,7 @@ class Manager:
                     state="failed", code="ADMIN_FAILED", message="管理任务异常结束，未确认成功"
                 )
             finally:
+                job.pop("private", None)
                 if self.active is job:
                     self.active = None
 
@@ -240,6 +244,41 @@ class Manager:
             if self.active is job:
                 job.update(state="cancelled", message="任务已取消")
                 self.active = None
+
+    async def qr_login(self, job: dict):
+        job.update(message="正在准备 B 站原生登录组件，不启动浏览器")
+        await self.cli(["add", "bilibili"])
+        opened = await self.helper("bilibili_qr_start", "bilibili")
+        image = qrcode.make(opened["url"], image_factory=qrcode.image.svg.SvgPathFillImage)
+        job["private"] = {"qrcode_key": opened["qrcode_key"], "image": image.to_string()}
+        job.update(state="waiting_user", message="请用哔哩哔哩 App 扫码，并在手机上确认登录")
+        try:
+            async with asyncio.timeout(180):
+                while True:
+                    await asyncio.sleep(QR_POLL_SECONDS)
+                    result = await self.helper(
+                        "bilibili_qr_poll",
+                        "bilibili",
+                        {"qrcode_key": job["private"]["qrcode_key"]},
+                    )
+                    state = result.get("state")
+                    if state == "authenticated":
+                        if result.get("saved") is not True or result.get("verified") is not True:
+                            raise BridgeError("INVALID_UPSTREAM", "扫码结果未确认凭据已验证并保存")
+                        return {"saved": True, "verified": True}
+                    if state == "expired":
+                        raise BridgeError("QR_EXPIRED", "二维码已过期，请重新生成", 410)
+                    if state not in {"waiting_scan", "waiting_confirm"}:
+                        raise BridgeError(
+                            "INVALID_UPSTREAM", "扫码接口返回未知状态，未确认登录成功"
+                        )
+                    job.update(
+                        message="已扫码，请在手机上确认登录"
+                        if state == "waiting_confirm"
+                        else "等待哔哩哔哩 App 扫码"
+                    )
+        except TimeoutError as exc:
+            raise BridgeError("QR_EXPIRED", "二维码已过期，请重新生成", 410) from exc
 
     async def login(self, job: dict):
         self.require_browser()
@@ -472,6 +511,28 @@ def mount_admin(app, settings: Settings, runner: Runner, catalog: Catalog, gate:
             return await manager.helper("cookie_delete", body.platform)
 
         return manager.start(key, "cookie_delete", body.platform, operation)
+
+    @router.post("/api/qr-login")
+    async def qr_login(body: ChannelInput, request: Request):
+        key = auth.require(request)
+        manager.check_channel(body.platform)
+        if body.platform != "bilibili":
+            raise BridgeError("BAD_INPUT", "当前仅 B 站提供原生二维码登录", 422)
+        return manager.start(key, "qr_login", "bilibili", manager.qr_login)
+
+    @router.get("/api/qr-login/{identifier}/image")
+    async def qr_image(identifier: str, request: Request):
+        owner = auth.require(request)
+        job = manager.active
+        if (
+            not job
+            or job["id"] != identifier
+            or job["owner"] != owner
+            or job["kind"] != "qr_login"
+            or job["state"] != "waiting_user"
+        ):
+            raise BridgeError("NO_QR", "当前会话没有可显示的二维码", 409)
+        return Response(job["private"]["image"], media_type="image/svg+xml")
 
     @router.post("/api/login")
     async def browser_login(body: ChannelInput, request: Request):

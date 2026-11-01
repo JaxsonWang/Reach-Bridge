@@ -4,7 +4,11 @@ version = "0.3.0"
 description = "供受限终端环境调用的 Agent-Reach 只读 HTTP 桥接服务"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1"]
+dependencies = [
+    "fastapi>=0.115,<1",
+    "qrcode>=8.2,<9",
+    "uvicorn>=0.34,<1",
+]
 
 [project.scripts]
 reach-bridge = "reach_bridge.app:main"

@@ -15,9 +15,12 @@ import struct
 import subprocess
 import sys
 import time
+from http.cookies import SimpleCookie
 from pathlib import Path
 from types import SimpleNamespace
-from urllib.parse import urlsplit, urlunsplit
+from urllib.error import HTTPError
+from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 SUPPORTED_VERSION = "1.6.1"
 MAX_INPUT = 256 * 1024
@@ -37,9 +40,12 @@ OPERATIONS = {
     "browser_finish",
     "browser_frame",
     "browser_input",
+    "bilibili_qr_start",
+    "bilibili_qr_poll",
 }
 BILI_LOGIN_URL = "https://passport.bilibili.com/login"
 MESSAGES = {
+    "QR_FAILED": "B站扫码协议或网络请求未完成，请重新生成二维码；原凭据未主动清除",
     "BAD_INPUT": "管理操作或参数不符合要求",
     "UNSUPPORTED_UPSTREAM": "管理适配器仅支持 Agent-Reach 1.6.1",
     "NEED_SETUP": "所需上游工具或专用浏览器尚未准备好",
@@ -203,6 +209,7 @@ def describe(upstream, name):
                 "cookie_delete": channel.name == "youtube",
                 "login": bool(login_url(channel)),
                 "native_session": channel.session or None,
+                "native_qr": channel.name == "bilibili",
                 "credential_keys": (
                     ["github-token"]
                     if channel.name == "github"
@@ -673,6 +680,143 @@ def save_bili_native(upstream, cookies):
         raise AdminError("VERIFICATION_FAILED") from exc
     require(result.returncode == 0, "VERIFICATION_FAILED")
     require(json.loads(result.stdout) == {"saved": True}, "UPSTREAM_ERROR")
+
+
+# v0.6.2 SDK 不能解析新版 crossDomain 票据；固定协议在成功轮询当次消费，
+# 不修改上游库，不跟随任意重定向，最终仍使用同一原生凭据验证与 writer。
+BILI_QR_ROOT = "https://passport.bilibili.com/x/passport-login/web/qrcode/"
+BILI_QR_COOKIE_NAMES = {"SESSDATA", "bili_jct", "DedeUserID", "buvid3", "buvid4", "ac_time_value"}
+
+
+class NoQrRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def bili_qr_http(url, *, ticket=False):
+    parsed = urlsplit(url)
+    allowed = (
+        parsed.hostname in {"passport.bilibili.com", "passport.biligame.com"}
+        and parsed.path == "/x/passport-login/web/crossDomain"
+        if ticket
+        else parsed.hostname == "passport.bilibili.com"
+        and parsed.path
+        in {
+            "/x/passport-login/web/qrcode/generate",
+            "/x/passport-login/web/qrcode/poll",
+        }
+    )
+    require(
+        allowed
+        and parsed.scheme == "https"
+        and parsed.port in (None, 443)
+        and not parsed.username
+        and not parsed.password
+        and not parsed.fragment
+        and not any(ord(c) < 33 or ord(c) == 127 for c in url),
+        "QR_FAILED",
+    )
+    request = Request(
+        url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36"
+            ),
+            "Referer": "https://passport.bilibili.com/",
+        },
+    )
+    try:
+        try:
+            response = build_opener(NoQrRedirect()).open(request, timeout=15)
+        except HTTPError as exc:
+            # 票据可能以 302 携带 Set-Cookie；只取当前响应，不访问 Location。
+            if ticket and exc.code in {301, 302, 303, 307, 308}:
+                response = exc
+            else:
+                raise
+        with response:
+            cookies = {}
+            for raw in response.headers.get_all("Set-Cookie", []):
+                parsed_cookie = SimpleCookie()
+                parsed_cookie.load(raw)
+                for name, value in parsed_cookie.items():
+                    if name in BILI_QR_COOKIE_NAMES:
+                        require(name not in cookies or cookies[name] == value.value, "QR_FAILED")
+                        cookies[name] = value.value
+            if ticket:
+                return {}, cookies
+            raw = response.read(MAX_INPUT + 1)
+            require(len(raw) <= MAX_INPUT, "QR_FAILED")
+            result = json.loads(raw)
+            require(isinstance(result, dict) and result.get("code") == 0, "QR_FAILED")
+            require(isinstance(result.get("data"), dict), "QR_FAILED")
+            return result["data"], cookies
+    except AdminError:
+        raise
+    except Exception as exc:
+        raise AdminError("QR_FAILED") from exc
+
+
+def bilibili_qr_start(upstream, channel, payload):
+    require(channel.name == "bilibili" and not payload)
+    # 扫码前确认 writer 已安装，避免用户确认后才发现无法持久化。
+    executable = upstream.tools.resolve("bili")
+    require(bool(executable), "NEED_SETUP")
+    require(
+        Path(executable).with_name("python.exe" if os.name == "nt" else "python").is_file(),
+        "NEED_SETUP",
+    )
+    data, _cookies = bili_qr_http(BILI_QR_ROOT + "generate")
+    key, url = data.get("qrcode_key"), data.get("url")
+    require(isinstance(key, str) and bool(re.fullmatch(r"[a-fA-F0-9]{32}", key)), "QR_FAILED")
+    require(isinstance(url, str) and len(url) <= 2048, "QR_FAILED")
+    target = urlsplit(url)
+    require(
+        target.scheme == "https"
+        and (target.netloc, target.path)
+        in {
+            ("account.bilibili.com", "/h5/account-h5/auth/scan-web"),
+            ("passport.bilibili.com", "/h5-app/passport/login/scan"),
+        }
+        and not target.fragment
+        and not any(ord(c) < 33 or ord(c) == 127 for c in url)
+        and parse_qs(target.query).get("qrcode_key") == [key],
+        "QR_FAILED",
+    )
+    return {"qrcode_key": key, "url": url, "expires_in": 180}
+
+
+def bilibili_qr_poll(upstream, channel, payload):
+    require(channel.name == "bilibili" and set(payload) == {"qrcode_key"})
+    key = payload["qrcode_key"]
+    require(isinstance(key, str) and bool(re.fullmatch(r"[a-fA-F0-9]{32}", key)))
+    data, cookies = bili_qr_http(BILI_QR_ROOT + "poll?" + urlencode({"qrcode_key": key}))
+    code = data.get("code")
+    states = {86101: "waiting_scan", 86090: "waiting_confirm", 86038: "expired"}
+    require(type(code) is int, "QR_FAILED")
+    if code in states:
+        return {"state": states[code]}
+    require(code == 0, "QR_FAILED")
+    if not cookies.get("SESSDATA"):
+        # 新协议凭据由官方票据端点响应头发放；不解析终端输出或 SDK 私有字段。
+        url = data.get("url")
+        require(isinstance(url, str) and len(url) <= 4096, "QR_FAILED")
+        _data, cookies = bili_qr_http(url, ticket=True)
+    refresh = data.get("refresh_token", "")
+    require(isinstance(refresh, str), "QR_FAILED")
+    if refresh:
+        cookies["ac_time_value"] = refresh
+    require(bool(cookies.get("SESSDATA")), "QR_FAILED")
+    rows = parse_cookies(
+        [
+            {"name": name, "value": value, "domain": ".bilibili.com"}
+            for name, value in cookies.items()
+        ],
+        ["bilibili.com"],
+    )
+    save_bili_native(upstream, rows)
+    mark_manual(upstream, channel, len(rows), verified=True)
+    return {"state": "authenticated", "verified": True, "saved": True}
 
 
 def browser_cookies(upstream, domains):
