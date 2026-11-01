@@ -27,6 +27,11 @@ def prepare_display_policy():
             "print(browser.chrome_binary() or '')",
         ],
         text=True,
+        env={
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("REACH_BRIDGE_") or key == "REACH_BRIDGE_BROWSER_EXECUTABLE"
+        },
     ).rstrip("\n")
     official = {"", "/usr/bin/chromium", launcher}
     return configured not in official or selected not in official

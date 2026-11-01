@@ -47,9 +47,14 @@ def test_startup_migrates_only_old_official_selection(monkeypatch, capsys, previ
     launcher = "/app/.venv/bin/reach-bridge-chromium"
     monkeypatch.setenv("REACH_BRIDGE_BROWSER_ENABLED", "true")
     monkeypatch.setenv("REACH_BRIDGE_BROWSER_EXECUTABLE", launcher)
+    monkeypatch.setenv("REACH_BRIDGE_TOKEN", "private-query")
+    monkeypatch.setenv("REACH_BRIDGE_ADMIN_TOKEN", "private-admin")
     scripts = []
 
     def inspect(args, **kwargs):
+        assert kwargs["env"]["REACH_BRIDGE_BROWSER_EXECUTABLE"] == launcher
+        assert "REACH_BRIDGE_TOKEN" not in kwargs["env"]
+        assert "REACH_BRIDGE_ADMIN_TOKEN" not in kwargs["env"]
         scripts.append(args[2])
         return previous + "\n"
 
