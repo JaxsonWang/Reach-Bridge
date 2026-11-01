@@ -893,7 +893,11 @@ dialog::backdrop {
 }
 .browser-stage img {
   display: block;
-  width: 100%;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 61vh;
+  margin-inline: auto;
   cursor: crosshair;
 }
 .browser-stage:focus {
@@ -1135,7 +1139,8 @@ dialog::backdrop {
     bottom: 18px;
     max-width: none;
   }
-  .browser-stage {
+  .browser-stage,
+  .browser-stage img {
     max-height: 50vh;
   }
 }
