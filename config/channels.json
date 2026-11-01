@@ -1,0 +1,7 @@
+{
+  "bilibili": {"hosts": ["www.bilibili.com", "bilibili.com"]},
+  "youtube": {"hosts": ["www.youtube.com", "youtube.com"]},
+  "github": {"hosts": ["github.com"]},
+  "v2ex": {"hosts": ["www.v2ex.com", "v2ex.com"]},
+  "xiaohongshu": {"hosts": ["www.xiaohongshu.com", "xiaohongshu.com"]}
+}

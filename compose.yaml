@@ -1,0 +1,26 @@
+name: reach-bridge
+services:
+  reach-bridge:
+    image: ghcr.io/jaxsonwang/reach-bridge:${REACH_BRIDGE_VERSION:-0.1.0}-agent-reach-${AGENT_REACH_VERSION:?请加载 upstream.env}
+    init: true
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      REACH_BRIDGE_TOKEN: ${REACH_BRIDGE_TOKEN:?请在 .env 中配置访问令牌}
+      REACH_BRIDGE_TIMEOUT: ${REACH_BRIDGE_TIMEOUT:-60}
+      REACH_BRIDGE_QUEUE_TIMEOUT: ${REACH_BRIDGE_QUEUE_TIMEOUT:-2}
+      REACH_BRIDGE_CONCURRENCY: ${REACH_BRIDGE_CONCURRENCY:-2}
+      REACH_BRIDGE_MAX_OUTPUT_BYTES: ${REACH_BRIDGE_MAX_OUTPUT_BYTES:-2097152}
+    ports:
+      - "${REACH_BRIDGE_BIND:-127.0.0.1}:${REACH_BRIDGE_PORT:-8080}:8080"
+    volumes:
+      - ./data/home:/data/home
+      - ./config:/app/config:ro
+    shm_size: 512m
+    stop_grace_period: 10s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/readyz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s

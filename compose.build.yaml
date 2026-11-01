@@ -1,0 +1,6 @@
+services:
+  reach-bridge:
+    build:
+      context: .
+      args:
+        AGENT_REACH_VERSION: ${AGENT_REACH_VERSION}

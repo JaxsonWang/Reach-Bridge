@@ -1,0 +1,170 @@
+name: 检查与发布
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: reach-bridge-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.9.3'
+          enable-cache: true
+      - run: uv sync --frozen --python 3.12
+      - run: uv run ruff check . && uv run ruff format --check .
+      - run: uv run pytest -q
+      - run: uv build
+  container:
+    needs: tests
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux/amd64
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 读取发布版本
+        id: meta
+        shell: bash
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          upstream=$(cut -d= -f2 upstream.env)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$upstream" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            test "$GITHUB_REF_NAME" = "v$version"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "upstream=$upstream" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v4
+      - name: 编译当前架构镜像
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: reach-bridge:test
+          build-args: AGENT_REACH_VERSION=${{ steps.meta.outputs.upstream }}
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+      - name: 验证真实 CLI、Compose 与 HTTP 就绪
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          UPSTREAM: ${{ steps.meta.outputs.upstream }}
+          IMAGE: ${{ steps.meta.outputs.image }}
+        run: |
+          docker run --rm reach-bridge:test agent-reach version
+          token=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
+          echo "::add-mask::$token"
+          export REACH_BRIDGE_TOKEN="$token"
+          export REACH_BRIDGE_VERSION="$VERSION"
+          resolved=$(docker compose --env-file upstream.env config --images)
+          test "$resolved" = "$IMAGE:$VERSION-agent-reach-$UPSTREAM"
+          docker run -d --name reach-bridge-test -e REACH_BRIDGE_TOKEN="$token" -p 127.0.0.1:8080:8080 reach-bridge:test
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8080/readyz; then break; fi
+            sleep 1
+          done
+          curl --fail-with-body http://127.0.0.1:8080/readyz
+          curl --fail-with-body http://127.0.0.1:8080/v1/channels -H "Authorization: Bearer $token"
+      - name: 登录镜像仓库
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: 推送已验证镜像并导出离线包
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          UPSTREAM: ${{ steps.meta.outputs.upstream }}
+          IMAGE: ${{ steps.meta.outputs.image }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          tag="$VERSION-agent-reach-$UPSTREAM"
+          docker tag reach-bridge:test "$IMAGE:$tag-$ARCH"
+          docker push "$IMAGE:$tag-$ARCH"
+          docker tag reach-bridge:test "$IMAGE:$tag"
+          mkdir -p dist
+          docker save "$IMAGE:$tag" | gzip > "dist/reach-bridge_${tag}_linux-${ARCH}.tar.gz"
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: docker-${{ matrix.arch }}
+          path: dist/*.tar.gz
+          retention-days: 1
+          compression-level: 0
+      - name: 清理测试容器
+        if: always()
+        run: |
+          if docker container inspect reach-bridge-test >/dev/null 2>&1; then
+            docker rm -f reach-bridge-test
+          fi
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [tests, container]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.9.3'
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: 发布多架构镜像索引
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          upstream=$(cut -d= -f2 upstream.env)
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          tag="$version-agent-reach-$upstream"
+          docker buildx imagetools create \
+            --tag "$image:$tag" --tag "$image:$version" --tag "$image:latest" \
+            "$image:$tag-amd64" "$image:$tag-arm64"
+          docker buildx imagetools inspect "$image:$tag"
+      - run: uv build --python 3.12
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: docker-*
+          merge-multiple: true
+          path: dist
+      - name: 打包源码并发布 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          git archive --format=zip --prefix="Reach-Bridge-$version/" HEAD > "dist/Reach-Bridge-$version.zip"
+          if draft=$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft 2>/dev/null); then
+            test "$draft" = true
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --draft \
+              --title "Reach-Bridge $GITHUB_REF_NAME" --notes-file "docs/releases/$GITHUB_REF_NAME.md"
+          fi
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          gh release edit "$GITHUB_REF_NAME" --draft=false --latest
