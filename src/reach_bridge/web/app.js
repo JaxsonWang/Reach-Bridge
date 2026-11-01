@@ -95,9 +95,11 @@ async function api(path, { method = "GET", body } = {}) {
   const data = await response.json();
   if (!response.ok) {
     if (response.status === 401 && path !== "/admin/login") showLogin();
-    throw new Error(
+    const error = new Error(
       data.error?.message || data.detail || `请求失败 (${response.status})`,
     );
+    error.response = data;
+    throw error;
   }
   return data;
 }
@@ -429,7 +431,7 @@ async function refreshJobs() {
         "",
         `${labels[job.kind] || job.kind} · ${names[job.platform] || job.platform}`,
       ),
-      el("p", "", job.message),
+      el("p", "", job.code ? `${job.code} · ${job.message}` : job.message),
     );
     const actions = el("div", "job-actions");
     const done = ["succeeded", "failed", "cancelled"].includes(job.state);
@@ -709,7 +711,9 @@ $("action-form").addEventListener("submit", async (event) => {
     $("action-result").textContent = JSON.stringify(result, null, 2);
     $("result-status").textContent = result.ok ? "已返回" : "未完成";
   } catch (error) {
-    $("action-result").textContent = error.message;
+    $("action-result").textContent = error.response
+      ? JSON.stringify(error.response, null, 2)
+      : error.message;
     $("result-status").textContent = "未完成";
   } finally {
     $("run-action").disabled = false;
