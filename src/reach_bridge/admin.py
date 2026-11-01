@@ -165,6 +165,7 @@ class Manager:
                 capability["login"] = False
                 capability["cookie_import"] = name in {"bilibili", "youtube"}
         description["browser_enabled"] = self.settings.browser_enabled
+        description["browser_sandbox"] = self.settings.browser_sandbox
         return description
 
     def check_channel(self, platform: str):
@@ -286,9 +287,10 @@ def mount_admin(app, settings: Settings, runner: Runner, catalog: Catalog, gate:
         return {
             "enabled": bool(settings.admin_token),
             "browser_enabled": settings.browser_enabled,
+            "browser_sandbox": settings.browser_sandbox,
             "origin": auth.origin,
             "insecure_http": settings.allow_insecure_http,
-            "version": "0.2.1",
+            "version": "0.3.0",
         }
 
     @router.post("/login")
@@ -299,7 +301,7 @@ def mount_admin(app, settings: Settings, runner: Runner, catalog: Catalog, gate:
                 "csrf": session.csrf,
                 "origin": auth.origin,
                 "insecure_http": settings.allow_insecure_http,
-                "version": "0.2.1",
+                "version": "0.3.0",
             }
         )
         response.set_cookie(
@@ -329,7 +331,7 @@ def mount_admin(app, settings: Settings, runner: Runner, catalog: Catalog, gate:
             "csrf": auth.sessions[key].csrf,
             "origin": auth.origin,
             "insecure_http": settings.allow_insecure_http,
-            "version": "0.2.1",
+            "version": "0.3.0",
         }
 
     @router.get("/api/channels")

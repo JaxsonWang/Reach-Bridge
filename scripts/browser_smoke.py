@@ -302,7 +302,10 @@ def exercise(helper, upstream, channel):
     print("准备系统 Chromium、OpenCLI 与扩展", flush=True)
     helper.execute("browser_prepare", channel.name, {}, upstream)
     state = upstream.browser._load_state()
-    assert state["backend"] == "chrome" and state["executable"] == "/usr/bin/chromium"
+    assert (
+        state["backend"] == "chrome"
+        and state["executable"] == os.environ["REACH_BRIDGE_BROWSER_EXECUTABLE"]
+    )
     assert upstream.browser.status()["opencli_connected"] is True
     print("打开受控 HTTPS 登录画布", flush=True)
     opened = helper.execute("browser_login", channel.name, {}, upstream)
@@ -363,7 +366,21 @@ def exercise(helper, upstream, channel):
         ),
         10,
     )
-    # 没有 --no-sandbox；此浏览器真实启动成功即验证当前容器具备所需 sandbox 条件。
+    sandbox = os.environ.get("REACH_BRIDGE_BROWSER_SANDBOX", "true")
+    profile_arg = "--user-data-dir=" + str(upstream.browser.profile_dir())
+    commands = []
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            command = (entry / "cmdline").read_bytes().decode().split("\0")
+        except (FileNotFoundError, PermissionError, ProcessLookupError):
+            continue
+        if profile_arg in command and not any(arg.startswith("--type=") for arg in command):
+            commands.append(command)
+    assert commands, "未找到本次浏览器主进程"
+    assert all(("--no-sandbox" in command) == (sandbox == "false") for command in commands)
+    print("BROWSER_SANDBOX=" + sandbox + "; 已核对实际 Chromium 进程参数", flush=True)
     print("已验证：扩展连接、HTTPS 页面、1280x800 PNG、点击、输入、按键、滚动、刷新", flush=True)
 
 

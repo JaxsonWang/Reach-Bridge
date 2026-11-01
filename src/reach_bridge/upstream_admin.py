@@ -431,14 +431,16 @@ def select_system_browser(upstream):
     require(not hasattr(os, "getuid") or os.getuid() != 0, "NEED_SETUP")
     current = upstream.browser._load_state()
     previous = current.get("executable")
+    selected = os.environ.get("REACH_BRIDGE_BROWSER_EXECUTABLE", "")
+    compatibility = os.environ.get("REACH_BRIDGE_BROWSER_SANDBOX", "true") == "false"
     if (
         current.get("backend") == "chrome"
         and isinstance(previous, str)
         and Path(previous).is_file()
         and os.access(previous, os.X_OK)
+        and (not compatibility or previous == selected)
     ):
         return
-    selected = os.environ.get("REACH_BRIDGE_BROWSER_EXECUTABLE", "")
     require(
         bool(selected)
         and Path(selected).is_absolute()

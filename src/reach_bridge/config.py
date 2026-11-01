@@ -48,6 +48,7 @@ class Settings:
     upstream_python: str | None = None
     admin_timeout: float = 900
     browser_enabled: bool = True
+    browser_sandbox: bool = True
 
     def __post_init__(self) -> None:
         if len(self.token) < 32 or not self.token.isascii() or any(c.isspace() for c in self.token):
@@ -79,11 +80,16 @@ class Settings:
                 origin.scheme == "http" and self.allow_insecure_http
             ):
                 raise ValueError("管理默认要求 HTTPS；私网 HTTP 须显式启用 ALLOW_INSECURE_HTTP")
+        if type(self.browser_sandbox) is not bool:
+            raise ValueError("browser_sandbox 必须是布尔值")
         if not 30 <= self.admin_timeout <= 1800:
             raise ValueError("管理任务时限须为 30～1800 秒")
 
     @classmethod
     def from_env(cls) -> "Settings":
+        sandbox = os.environ.get("REACH_BRIDGE_BROWSER_SANDBOX", "true").lower()
+        if sandbox not in {"true", "false"}:
+            raise ValueError("REACH_BRIDGE_BROWSER_SANDBOX 只能为 true 或 false")
         return cls(
             token=os.environ.get("REACH_BRIDGE_TOKEN", ""),
             channels_file=Path(
@@ -103,6 +109,7 @@ class Settings:
             else None,
             upstream_python=os.environ.get("REACH_BRIDGE_UPSTREAM_PYTHON") or None,
             admin_timeout=float(os.environ.get("REACH_BRIDGE_ADMIN_TIMEOUT", "900")),
+            browser_sandbox=sandbox == "true",
             browser_enabled=os.environ.get("REACH_BRIDGE_BROWSER_ENABLED", "true").lower()
             == "true",
         )

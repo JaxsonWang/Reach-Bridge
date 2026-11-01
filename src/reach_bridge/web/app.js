@@ -130,6 +130,10 @@ async function refreshChannels() {
   state.channels = data.channels;
   state.browserEnabled = data.browser_enabled !== false;
   $("native-banner").classList.toggle("hidden", state.browserEnabled);
+  $("browser-compat-banner").classList.toggle(
+    "hidden",
+    !state.browserEnabled || data.browser_sandbox !== false,
+  );
   $("upstream-version").textContent = data.agent_reach_version;
   $("total-count").textContent = `共 ${data.channels.length} 个渠道`;
   $("channel-total").textContent = data.channels.length;

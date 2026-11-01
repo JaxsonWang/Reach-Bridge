@@ -1,7 +1,7 @@
 name: reach-bridge
 services:
   reach-bridge:
-    image: ghcr.io/jaxsonwang/reach-bridge:${REACH_BRIDGE_VERSION:-0.2.1}-agent-reach-${AGENT_REACH_VERSION:?请加载 upstream.env}
+    image: ghcr.io/jaxsonwang/reach-bridge:${REACH_BRIDGE_VERSION:-0.3.0}-agent-reach-${AGENT_REACH_VERSION:?请加载 upstream.env}
     init: true
     restart: unless-stopped
     user: "${PUID:-1000}:${PGID:-1000}"
@@ -11,6 +11,7 @@ services:
       REACH_BRIDGE_ADMIN_ORIGIN: ${REACH_BRIDGE_ADMIN_ORIGIN:-}
       REACH_BRIDGE_ALLOW_INSECURE_HTTP: ${REACH_BRIDGE_ALLOW_INSECURE_HTTP:-false}
       REACH_BRIDGE_BROWSER_ENABLED: ${REACH_BRIDGE_BROWSER_ENABLED:-true}
+      REACH_BRIDGE_BROWSER_SANDBOX: ${REACH_BRIDGE_BROWSER_SANDBOX:-true}
       REACH_BRIDGE_ADMIN_TIMEOUT: ${REACH_BRIDGE_ADMIN_TIMEOUT:-900}
       REACH_BRIDGE_TIMEOUT: ${REACH_BRIDGE_TIMEOUT:-60}
       REACH_BRIDGE_QUEUE_TIMEOUT: ${REACH_BRIDGE_QUEUE_TIMEOUT:-2}
@@ -22,7 +23,7 @@ services:
       - ./data/home:/data/home
       - ./config:/app/config:ro
     security_opt:
-      - seccomp=./docker/chromium-seccomp.json
+      - "${REACH_BRIDGE_SECURITY_OPT:-seccomp=./docker/chromium-seccomp.json}"
     shm_size: 512m
     stop_grace_period: 10s
     healthcheck:

@@ -159,6 +159,7 @@ class Catalog:
         return {
             "agent_reach_version": self.version,
             "browser_enabled": self.settings.browser_enabled,
+            "browser_sandbox": self.settings.browser_sandbox,
             "channels": rows,
         }
 

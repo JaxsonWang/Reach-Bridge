@@ -118,6 +118,20 @@ jobs:
             --mount "type=bind,src=$PWD/scripts/browser_smoke.py,dst=/tmp/browser_smoke.py,readonly" \
             reach-bridge:test \
             /opt/uv-tools/agent-reach/bin/python /tmp/browser_smoke.py
+      - name: 验证 NAS 兼容模式的真实浏览器与扩展
+        timeout-minutes: 20
+        run: |
+          docker run --rm --init --name reach-bridge-compat-test \
+            --user 1026:100 \
+            --tmpfs /data/home:uid=1026,gid=100,mode=0700 \
+            --shm-size=512m \
+            --security-opt no-new-privileges=true \
+            --sysctl net.ipv4.ip_unprivileged_port_start=0 \
+            --add-host reach-bridge-smoke.test:127.0.0.1 \
+            -e REACH_BRIDGE_BROWSER_SANDBOX=false \
+            --mount "type=bind,src=$PWD/scripts/browser_smoke.py,dst=/tmp/browser_smoke.py,readonly" \
+            reach-bridge:test \
+            /opt/uv-tools/agent-reach/bin/python /tmp/browser_smoke.py
       - name: 登录镜像仓库
         if: startsWith(github.ref, 'refs/tags/v')
         uses: docker/login-action@v4
@@ -154,6 +168,9 @@ jobs:
           fi
           if docker container inspect reach-bridge-native-test >/dev/null 2>&1; then
             docker rm -f reach-bridge-native-test
+          fi
+          if docker container inspect reach-bridge-compat-test >/dev/null 2>&1; then
+            docker rm -f reach-bridge-compat-test
           fi
           if docker container inspect reach-bridge-browser-test >/dev/null 2>&1; then
             docker rm -f reach-bridge-browser-test

@@ -367,6 +367,35 @@ def test_browser_input_is_fixed_and_does_not_echo_text(monkeypatch, upstream):
     assert code == 1 and result["error"]["code"] == "BAD_INPUT"
 
 
+def test_compatibility_selects_configured_launcher(monkeypatch, upstream, tmp_path):
+    old, launcher = tmp_path / "chromium", tmp_path / "reach-bridge-chromium"
+    for executable in (old, launcher):
+        executable.touch()
+        executable.chmod(0o755)
+    upstream.browser._load_state = lambda: {"backend": "chrome", "executable": str(old)}
+    monkeypatch.setenv("REACH_BRIDGE_BROWSER_EXECUTABLE", str(launcher))
+    monkeypatch.setenv("REACH_BRIDGE_BROWSER_SANDBOX", "false")
+    stopped = []
+    upstream.browser.stop = lambda: stopped.append(True) or True
+    admin.select_system_browser(upstream)
+    assert stopped == [True]
+    assert upstream.calls == [
+        (
+            "state",
+            {
+                "backend": "chrome",
+                "executable": str(launcher),
+                "launcher_python": None,
+                "fallback_reason": None,
+            },
+        )
+    ]
+    upstream.calls.clear()
+    upstream.browser._load_state = lambda: {"backend": "chrome", "executable": str(launcher)}
+    admin.select_system_browser(upstream)
+    assert not upstream.calls and stopped == [True]
+
+
 def test_selected_system_browser_is_preserved(monkeypatch, upstream, tmp_path):
     executable = tmp_path / "chromium"
     executable.touch()

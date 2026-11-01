@@ -77,6 +77,9 @@ class Runner:
                 env["REACH_BRIDGE_BROWSER_EXECUTABLE"] = os.environ[
                     "REACH_BRIDGE_BROWSER_EXECUTABLE"
                 ]
+            if not self.settings.browser_sandbox:
+                # 只透传显式选择的启动策略，不把管理令牌带给上游或浏览器。
+                env["REACH_BRIDGE_BROWSER_SANDBOX"] = "false"
             env["REACH_API_SUPERVISED"] = "1"
             try:
                 proc = await asyncio.create_subprocess_exec(

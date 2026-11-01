@@ -18,7 +18,7 @@ docker compose --env-file .env --env-file upstream.env up -d --no-build --wait
 
 默认仅绑定 `127.0.0.1:8080`，适合反向代理提供 HTTPS。需要私网直连时修改 `REACH_BRIDGE_BIND` 和 `REACH_BRIDGE_PORT`，并限制宿主入站访问。不要把明文 HTTP 暴露到公网。
 
-固定镜像：`ghcr.io/jaxsonwang/reach-bridge:0.2.1-agent-reach-1.6.1`。发布包同时提供分架构 `.tar.gz` 离线镜像，可用 `docker load -i <镜像文件>` 导入后跳过 `pull`。
+固定镜像：`ghcr.io/jaxsonwang/reach-bridge:0.3.0-agent-reach-1.6.1`。发布包同时提供分架构 `.tar.gz` 离线镜像，可用 `docker load -i <镜像文件>` 导入后跳过 `pull`。
 
 ### 启用 WebUI 管理
 
@@ -51,9 +51,27 @@ REACH_BRIDGE_ALLOW_INSECURE_HTTP=true
 
 “已保存”不等于登录验证成功或拥有平台全部能力。Cookie 可能过期，平台也可能限流、要求验证或限制内容；通过实际动作验收。上游实验性渠道仍保留实验性限制。
 
+### NAS 浏览器兼容模式
+
+需要在受限内核上使用 X / Twitter、小红书等站内工具时，可显式关闭 Chromium 内部 sandbox，无需安装虚拟机。在 `.env` 设置：
+
+```dotenv
+REACH_BRIDGE_BROWSER_ENABLED=true
+REACH_BRIDGE_BROWSER_SANDBOX=false
+REACH_BRIDGE_SECURITY_OPT=no-new-privileges=true
+```
+
+保留非 root 的 `PUID` / `PGID`。Compose 的安全选项改用 `no-new-privileges=true`，不引用宿主不支持的自定义 seccomp 文件；不添加 `SYS_ADMIN`、`privileged`、`seccomp=unconfined` 或 Docker socket。已有自定义 Compose 必须将 `REACH_BRIDGE_BROWSER_SANDBOX` 传入容器，并将原 `security_opt` 中的 Chromium seccomp 引用替换为 `no-new-privileges=true`；只修改 `.env` 不会改变写死的 Compose 配置。
+
+拉取新镜像并重新创建服务后，在 WebUI 对所需平台点击“准备依赖”，再“准备并登录”。准备操作会将之前选定的系统 Chromium 切换为镜像内统一启动入口；保留专用资料目录、已有会话和渠道策略。新入口仅在显式 `false` 时添加 `--no-sandbox`，保留 CDP pipe、信号与原有浏览器生命周期。查询接口不代替管理员执行首次准备。小红书 / X 仍通过 OpenCLI 执行站内动作，不改成公开网页搜索。
+
+WebUI 显示“NAS 兼容模式：Chromium sandbox 已关闭”；这表示运行方式，不表示平台已登录或搜索已验证。关闭内部 sandbox 后，浏览器漏洞可能影响其能访问的会话及容器内数据；Docker 隔离不能替代浏览器 sandbox。仅在接受此取舍的专用环境启用，不挂载个人浏览器或额外敏感目录。该模式不关闭 HTTPS 证书校验或网页同源安全，不公开浏览器调试端口，也不会在标准模式启动失败时自动启用。
+
+恢复标准模式时，将 `REACH_BRIDGE_BROWSER_SANDBOX` 改回 `true`、`REACH_BRIDGE_SECURITY_OPT` 改回 `seccomp=./docker/chromium-seccomp.json` 并重新创建服务，确保旧浏览器进程已经结束。只需要原生工具时使用下面的无浏览器模式。
+
 ### 无浏览器模式
 
-宿主内核不能支持 Chromium sandbox，或只需要原生工具时，在 `.env` 设置：
+只需要原生工具，或不采用上述兼容模式时，在 `.env` 设置：
 
 ```dotenv
 REACH_BRIDGE_BROWSER_ENABLED=false
@@ -115,7 +133,7 @@ curl --fail-with-body http://127.0.0.1:8080/v1/actions/bilibili/hot \
 ## 部署边界
 
 - 网关限制输入域名，不代替宿主出站防火墙：上游会重定向、访问外部服务及加载浏览器子资源。普通 Docker bridge 不隔离敏感内网。
-- 镜像内置 Chromium、Node、Xvfb、ffmpeg 和中文字体。浏览器以非 root 身份运行，保留 sandbox；Compose 使用随发布包提供的 `docker/chromium-seccomp.json`，仅在 Docker 默认策略基础上放行所需 namespace 系统调用，部署时须保留该文件。宿主仍须具备用户命名空间能力，策略文件不能补齐缺失的内核功能。详见 [浏览器隔离配置](docker/chromium-seccomp.README.md)。未准备好时明确失败，不自动使用 `--no-sandbox` 或特权容器。
+- 镜像内置 Chromium、Node、Xvfb、ffmpeg 和中文字体。浏览器以非 root 身份运行，默认保留 sandbox；标准 Compose 安全选项使用随发布包提供的 `docker/chromium-seccomp.json`，仅在 Docker 默认策略基础上放行所需 namespace 系统调用，部署时须保留该文件。宿主仍须具备用户命名空间能力，策略文件不能补齐缺失的内核功能。详见 [浏览器隔离配置](docker/chromium-seccomp.README.md)。未准备好时明确失败；只有显式设置上述 NAS 兼容模式才使用 `--no-sandbox`，不使用特权容器。
 - 不公开 CDP / VNC 端口。登录画面与输入仅经管理会话转发；可见画面仍含账号内容，请保护管理访问入口。
 - `data/home` 与更新快照包含 Cookie、凭据和工具状态。限制访问，不共享、不提交 Git。仅镜像切回不能撤销数据变化，完整回滚须恢复对应 HOME 快照。
 - 请求超时、断开和服务关闭会取消对应 CLI 进程组；上游 detached 共享浏览器另有生命周期，停止整个容器负责最终回收。

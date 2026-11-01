@@ -9,7 +9,7 @@ LABEL io.reach-bridge.agent-reach-version="${AGENT_REACH_VERSION}"
 ENV UV_TOOL_DIR=/opt/uv-tools UV_TOOL_BIN_DIR=/opt/uv-bin \
     UV_PYTHON_DOWNLOADS=never HOME=/data/home \
     PATH="/app/.venv/bin:/opt/uv-bin:/opt/node/bin:${PATH}" \
-    DISPLAY=:99 REACH_BRIDGE_BROWSER_EXECUTABLE=/usr/bin/chromium \
+    DISPLAY=:99 REACH_BRIDGE_BROWSER_EXECUTABLE=/app/.venv/bin/reach-bridge-chromium \
     PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates git chromium chromium-sandbox xvfb x11-utils dbus-x11 \
