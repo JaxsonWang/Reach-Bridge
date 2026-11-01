@@ -1,5 +1,7 @@
 """固定 Agent-Reach 1.6.1 管理适配器；仅通过 stdin JSON 接收敏感内容。"""
 
+import base64
+import binascii
 import contextlib
 import importlib
 import ipaddress
@@ -9,6 +11,7 @@ import os
 import re
 import shlex
 import sqlite3
+import struct
 import subprocess
 import sys
 import time
@@ -49,6 +52,7 @@ MESSAGES = {
     "TIMEOUT": "管理操作超过时限",
     "UPSTREAM_ERROR": "上游管理操作失败，未确认完成",
     "CONFIG_CONFLICT": "已有自定义 yt-dlp 配置，请管理员处理后再管理 YouTube Cookie",
+    "FRAME_SIZE_MISMATCH": "浏览器截图不符合 1280×800 登录画布尺寸",
 }
 
 
@@ -558,23 +562,53 @@ def browser_login(upstream, channel):
 
     require(upstream.browser.wait_for(ready, 5), "TARGET_UNAVAILABLE")
     target_id = chosen[0]["id"]
-    cdp_call(
-        upstream,
-        "Emulation.setDeviceMetricsOverride",
-        {
-            "width": 1280,
-            "height": 800,
-            "deviceScaleFactor": 1,
-            "mobile": False,
-        },
-        target_id=target_id,
-    )
+    set_browser_contents_size(upstream, target_id)
     return {
         "target_id": target_id,
         "url": safe_page_url(chosen[0]["url"], login_domains(upstream, channel)),
         "width": 1280,
         "height": 800,
     }
+
+
+def set_browser_contents_size(upstream, target_id):
+    # 上游 CDP 每次调用后断开；Emulation 覆盖随连接关闭失效，必须修改真实窗口内容尺寸。
+    window = cdp_call(upstream, "Browser.getWindowForTarget", {"targetId": target_id})
+    window_id = window.get("windowId")
+    require(type(window_id) is int, "BROWSER_FAILED")
+    if window.get("bounds", {}).get("windowState") != "normal":
+        cdp_call(
+            upstream,
+            "Browser.setWindowBounds",
+            {
+                "windowId": window_id,
+                "bounds": {"windowState": "normal"},
+            },
+        )
+    cdp_call(
+        upstream,
+        "Browser.setContentsSize",
+        {
+            "windowId": window_id,
+            "width": 1280,
+            "height": 800,
+        },
+    )
+
+    def resized():
+        # 固定只读表达式，不接受客户端脚本；等待窗口变化传播到 renderer。
+        result = cdp_call(
+            upstream,
+            "Runtime.evaluate",
+            {
+                "expression": "window.innerWidth === 1280 && window.innerHeight === 800",
+                "returnByValue": True,
+            },
+            target_id=target_id,
+        )
+        return result.get("result", {}).get("value") is True
+
+    require(upstream.browser.wait_for(resized, 5), "FRAME_SIZE_MISMATCH")
 
 
 # 固定程序只在已安装的 bili-cli 环境运行；先验证，再由官方 writer 暂存并原子替换。
@@ -730,6 +764,15 @@ def browser_frame(upstream, channel, payload):
     )
     image = screenshot.get("data")
     require(isinstance(image, str) and 0 < len(image) <= 8 * 1024 * 1024, "BROWSER_FAILED")
+    try:
+        png = base64.b64decode(image, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise AdminError("BROWSER_FAILED") from exc
+    require(
+        len(png) >= 24 and png[:8] == b"\x89PNG\r\n\x1a\n" and png[12:16] == b"IHDR",
+        "BROWSER_FAILED",
+    )
+    require(struct.unpack(">II", png[16:24]) == (1280, 800), "FRAME_SIZE_MISMATCH")
     return {
         "image": image,
         "url": safe,

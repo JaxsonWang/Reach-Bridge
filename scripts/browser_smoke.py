@@ -175,6 +175,37 @@ def diagnose_pipe(chrome, extension):
 def browser_diagnostics(upstream, directory):
     """失败诊断不是重试验收；无论诊断结果如何，调用方仍抛出原失败。"""
     chrome = "/usr/bin/chromium"
+    for page in upstream.cdp._json("/json/list") or []:
+        if page.get("type") != "page" or not page.get("url", "").startswith(f"https://{HOST}/"):
+            continue
+        target_id = page["id"]
+        metrics = upstream.cdp.call("Page.getLayoutMetrics", target_id=target_id)
+        window = upstream.cdp.call("Browser.getWindowForTarget", {"targetId": target_id})
+        print("FRAME_LAYOUT=" + json.dumps(metrics), flush=True)
+        print("FRAME_WINDOW=" + json.dumps(window), flush=True)
+        captured = upstream.cdp.call(
+            "Page.captureScreenshot",
+            {
+                "format": "png",
+                "fromSurface": True,
+                "captureBeyondViewport": False,
+            },
+            target_id=target_id,
+        )
+        if captured and isinstance(captured.get("data"), str):
+            png = base64.b64decode(captured["data"], validate=True)
+            signature = len(png) >= 24 and png[:8] == b"\x89PNG\r\n\x1a\n"
+            print(
+                "FRAME_PNG="
+                + json.dumps(
+                    {
+                        "png_signature": signature,
+                        "bytes": len(png),
+                        "ihdr_size": struct.unpack(">II", png[16:24]) if signature else None,
+                    }
+                ),
+                flush=True,
+            )
     for name in (
         "/proc/self/attr/current",
         "/proc/sys/user/max_user_namespaces",
@@ -285,6 +316,18 @@ def exercise(helper, upstream, channel):
     assert ready, "受控 HTTPS 页面未就绪（包括证书信任问题）"
     frame = helper.execute("browser_frame", channel.name, {"target_id": target_id}, upstream)
     png = base64.b64decode(frame["image"], validate=True)
+    print(
+        "FRAME_ACCEPTANCE="
+        + json.dumps(
+            {
+                "png_signature": png[:8] == b"\x89PNG\r\n\x1a\n",
+                "bytes": len(png),
+                "ihdr_size": struct.unpack(">II", png[16:24]),
+                "reported_size": [frame["width"], frame["height"]],
+            }
+        ),
+        flush=True,
+    )
     assert png[:8] == b"\x89PNG\r\n\x1a\n" and struct.unpack(">II", png[16:24]) == (1280, 800)
     assert frame["url"] == f"https://{HOST}/login"
 

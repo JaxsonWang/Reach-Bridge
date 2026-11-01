@@ -543,6 +543,13 @@ function renderParams() {
     label.append(input);
     $("action-params").append(label);
   }
+  $("action-runtime").textContent = !action
+    ? ""
+    : action.browser_backend
+      ? action.public_web_available
+        ? "站内工具路径需要浏览器。上游在特定条件下会先尝试公开网页路径；公开结果不等于站内完整数据。"
+        : "此动作需要服务端浏览器运行；导入 Cookie 不能替代浏览器内核。"
+      : "此动作不依赖完整浏览器，通过原生工具或 HTTP 后端执行；仍需准备对应工具与凭据。";
   $("run-action").disabled = !action;
 }
 async function refreshFrame() {

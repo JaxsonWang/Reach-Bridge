@@ -121,7 +121,17 @@ class Catalog:
                     "description": channel["description"],
                     "enabled": policy is not None and policy.enabled,
                     "actions": [a["name"] for a in actions],
-                    "action_schemas": actions,
+                    "action_schemas": [
+                        {
+                            **action,
+                            "browser_backend": bool(
+                                {"opencli", "boss-agent-cli"} & set(action.get("backends", []))
+                            )
+                            or (name == "xueqiu" and action["name"] in {"hot_posts", "hot_stocks"}),
+                            "public_web_available": bool(action.get("public_web")),
+                        }
+                        for action in actions
+                    ],
                     "available_actions": [
                         a["name"] for a in channel["actions"] if a["name"] in READ_ACTIONS
                     ],

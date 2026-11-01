@@ -74,3 +74,16 @@ def test_canonical_policy_seeds_once_and_disabled_admin_uses_legacy(settings, tm
     value.set_policy("bilibili", ChannelPolicy(hosts=["www.bilibili.com"], enabled=False))
     assert Catalog(configured).policies["bilibili"].enabled is False
     assert Catalog(settings).policies["bilibili"].enabled is True
+
+
+def test_runtime_metadata_distinguishes_public_routes_and_browser_backends(settings):
+    value = catalog(settings)
+    value.channels["bilibili"]["actions"][0].update(backends=["bili-cli"])
+    value.channels["bilibili"]["actions"][2].update(
+        backends=["opencli"], public_web=["www.bilibili.com/video/"]
+    )
+    actions = {a["name"]: a for a in value.describe()["channels"][0]["action_schemas"]}
+    assert actions["hot"]["browser_backend"] is False
+    assert actions["comments"]["browser_backend"] is True
+    assert actions["comments"]["public_web_available"] is True
+    assert "execute" not in actions

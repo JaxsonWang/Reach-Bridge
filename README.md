@@ -101,7 +101,7 @@ curl --fail-with-body http://127.0.0.1:8080/v1/actions/bilibili/hot \
 ## 部署边界
 
 - 网关限制输入域名，不代替宿主出站防火墙：上游会重定向、访问外部服务及加载浏览器子资源。普通 Docker bridge 不隔离敏感内网。
-- 镜像内置 Chromium、Node、Xvfb、ffmpeg 和中文字体。浏览器以非 root 身份运行，保留 sandbox；主机内核及容器策略须支持 Chromium sandbox。未准备好时明确失败，不自动使用 `--no-sandbox` 或特权容器。
+- 镜像内置 Chromium、Node、Xvfb、ffmpeg 和中文字体。浏览器以非 root 身份运行，保留 sandbox；Compose 使用随发布包提供的 `docker/chromium-seccomp.json`，仅在 Docker 默认策略基础上放行所需 namespace 系统调用，部署时须保留该文件。宿主仍须具备用户命名空间能力，策略文件不能补齐缺失的内核功能。详见 [浏览器隔离配置](docker/chromium-seccomp.README.md)。未准备好时明确失败，不自动使用 `--no-sandbox` 或特权容器。
 - 不公开 CDP / VNC 端口。登录画面与输入仅经管理会话转发；可见画面仍含账号内容，请保护管理访问入口。
 - `data/home` 与更新快照包含 Cookie、凭据和工具状态。限制访问，不共享、不提交 Git。仅镜像切回不能撤销数据变化，完整回滚须恢复对应 HOME 快照。
 - 请求超时、断开和服务关闭会取消对应 CLI 进程组；上游 detached 共享浏览器另有生命周期，停止整个容器负责最终回收。

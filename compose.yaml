@@ -20,6 +20,8 @@ services:
     volumes:
       - ./data/home:/data/home
       - ./config:/app/config:ro
+    security_opt:
+      - seccomp=./docker/chromium-seccomp.json
     shm_size: 512m
     stop_grace_period: 10s
     healthcheck:

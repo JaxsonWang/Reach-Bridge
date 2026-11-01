@@ -1,10 +1,12 @@
 """管理 helper 的协议、权限边界与凭据替换测试，不连接真实平台或浏览器。"""
 
+import base64
 import http.cookiejar
 import io
 import json
 import os
 import sqlite3
+import struct
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -16,6 +18,12 @@ from reach_bridge import upstream_admin as admin
 
 def channel(name="example"):
     return SimpleNamespace(name=name, login_url="https://www.example.com/login", session="")
+
+
+def png_header(width=1280, height=800):
+    return base64.b64encode(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR" + struct.pack(">II", width, height)
+    ).decode()
 
 
 @pytest.fixture
@@ -50,7 +58,7 @@ def upstream(tmp_path):
         if method == "Storage.getCookies":
             return {"cookies": cookies}
         if method == "Page.captureScreenshot":
-            return {"data": "cG5n"}
+            return {"data": png_header()}
         return {}
 
     def mutate(callback):
@@ -319,7 +327,7 @@ def test_browser_frame_omits_url_query_and_fragment(monkeypatch, upstream):
     code, result, text = invoke(
         monkeypatch, upstream, "browser_frame", payload={"target_id": "PAGE1"}
     )
-    assert code == 0 and result["result"]["image"] == "cG5n"
+    assert code == 0 and result["result"]["image"] == png_header()
     assert result["result"]["url"] == "https://www.example.com/login"
     assert "private-fragment" not in text
 
@@ -720,3 +728,40 @@ def test_youtube_offline_cleanup_failure_is_visible_and_keeps_native_files(monke
     config, jar, _ = admin.youtube_layout(youtube)
     assert code == 1 and result["error"]["code"] == "UPSTREAM_ERROR"
     assert config.exists() and jar.exists()
+
+
+def test_real_window_size_persists_across_cdp_connections(upstream):
+    size = [1050, 713]
+    methods = []
+
+    def independent_connection(method, params=None, *, target_id=None):
+        methods.append(method)
+        if method == "Browser.getWindowForTarget":
+            return {"windowId": 17, "bounds": {"windowState": "normal"}}
+        if method == "Browser.setContentsSize":
+            assert params["windowId"] == 17
+            size[:] = [params["width"], params["height"]]
+            return {}
+        if method == "Runtime.evaluate":
+            return {"result": {"value": size == [1280, 800]}}
+        raise AssertionError("不应使用随连接关闭失效的 Emulation 覆盖")
+
+    upstream.cdp.call = independent_connection
+    admin.set_browser_contents_size(upstream, "PAGE1")
+    assert size == [1280, 800]
+    assert methods == ["Browser.getWindowForTarget", "Browser.setContentsSize", "Runtime.evaluate"]
+
+
+@pytest.mark.parametrize(
+    "data,expected",
+    [
+        (png_header(1050, 713), "FRAME_SIZE_MISMATCH"),
+        ("not-base64", "BROWSER_FAILED"),
+        (base64.b64encode(b"not-png").decode(), "BROWSER_FAILED"),
+    ],
+)
+def test_frame_rejects_wrong_dimensions_or_format(monkeypatch, upstream, data, expected):
+    upstream.cdp.call = lambda *args, **kwargs: {"data": data}
+    code, result, _ = invoke(monkeypatch, upstream, "browser_frame", payload={"target_id": "PAGE1"})
+    assert code == 1 and result["error"]["code"] == expected
+    assert result["result"] == {}
