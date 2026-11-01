@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Reach-Bridge · 控制台</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/assets/style.css" />
+    <script src="/assets/app.js" defer></script>
+  </head>
+  <body>
+    <aside class="sidebar">
+      <a class="brand" href="/"
+        ><span class="brand-mark">R↗</span
+        ><span>Reach<span class="brand-sub">BRIDGE CONSOLE</span></span></a
+      >
+      <div class="sidebar-label">工作空间</div>
+      <nav aria-label="主导航">
+        <button class="nav-item active" data-view="channels">
+          <span>▦</span>渠道管理
+        </button>
+        <button class="nav-item" data-view="credentials">
+          <span>◇</span>凭据与登录
+        </button>
+        <button class="nav-item" data-view="playground">
+          <span>⌘</span>操作台
+        </button>
+      </nav>
+      <div class="sidebar-bottom">
+        <span class="live-dot"></span> 自托管 · 只读能力<span
+          class="version-label"
+          >v0.2.0</span
+        >
+      </div>
+    </aside>
+    <main>
+      <header class="topbar">
+        <span
+          >Reach-Bridge <span class="separator">/</span>
+          <span id="breadcrumb">渠道管理</span></span
+        >
+        <div class="top-actions">
+          <span id="connection" class="connection">连接中</span
+          ><button id="logout" class="quiet hidden">退出管理</button>
+        </div>
+      </header>
+      <section id="login-view" class="login-wrap">
+        <div class="login-intro">
+          <span class="eyebrow">YOUR TOOLS. ONE BRIDGE.</span>
+          <h1>让受限终端，<br />连接更多可能。</h1>
+          <p>
+            在自己的环境里管理平台能力、凭据与登录会话。<br />查询与管理权限分开，账号始终留在服务端。
+          </p>
+          <div class="intro-line">
+            <span>01</span> 连接渠道 <span>02</span> 配置凭据
+            <span>03</span> 开始调用
+          </div>
+        </div>
+        <form id="login-form" class="login-card">
+          <div class="small-icon">↗</div>
+          <h2>进入控制台</h2>
+          <p class="muted">使用独立管理员令牌登录</p>
+          <label for="admin-token">管理员令牌</label
+          ><input
+            id="admin-token"
+            type="password"
+            autocomplete="current-password"
+            placeholder="不是查询 API 的访问令牌"
+            required
+            minlength="32"
+          /><button class="primary wide" type="submit">
+            登录管理界面 <span>→</span>
+          </button>
+          <p id="login-message" class="form-message" role="status"></p>
+          <div id="admin-disabled" class="setup-note hidden">
+            管理尚未启用。请配置独立的
+            <code>REACH_BRIDGE_ADMIN_TOKEN</code> 和精确的
+            <code>REACH_BRIDGE_ADMIN_ORIGIN</code>；原有查询接口仍可正常使用。
+          </div>
+          <div id="insecure-login" class="notice amber hidden">
+            当前连接未加密。只在可信私网使用，推荐通过 HTTPS 管理凭据。
+          </div>
+        </form>
+      </section>
+      <div id="workspace" class="workspace hidden">
+        <div id="insecure-banner" class="notice amber hidden">
+          私网 HTTP 模式已显式开启。该连接不加密，凭据管理建议使用 HTTPS。
+        </div>
+        <div class="page-heading">
+          <div>
+            <span class="eyebrow">WORKSPACE OVERVIEW</span>
+            <h1 id="page-title">渠道管理</h1>
+            <p id="page-description">按需连接平台，让能力和权限一目了然。</p>
+          </div>
+          <button id="refresh-status" class="secondary">↻ 读取运行状态</button>
+        </div>
+        <div class="summary-grid">
+          <div class="summary">
+            <span>已开放渠道</span><strong id="enabled-count">—</strong
+            ><small id="total-count">正在读取</small>
+          </div>
+          <div class="summary">
+            <span>已开放只读动作</span><strong id="action-count">—</strong
+            ><small>字幕、评论、热门与更多</small>
+          </div>
+          <div class="summary">
+            <span>已配置 API 凭据</span><strong id="key-count">—</strong
+            ><small>仅显示状态，不回显原值</small>
+          </div>
+          <div class="summary summary-accent">
+            <span>Agent-Reach</span><strong id="upstream-version">—</strong
+            ><small>固定版本 · 可独立维护</small>
+          </div>
+        </div>
+        <section id="view-channels" class="view">
+          <div class="section-toolbar">
+            <div>
+              <h2>
+                平台渠道 <span id="channel-total" class="count-pill"></span>
+              </h2>
+              <p class="muted">
+                开放接口与安装依赖是两件事，登录状态以实际动作验证为准。
+              </p>
+            </div>
+            <label class="search-field"
+              ><span>⌕</span
+              ><input
+                id="channel-search"
+                type="search"
+                aria-label="筛选渠道"
+                placeholder="筛选平台…"
+            /></label>
+          </div>
+          <div class="channel-layout">
+            <div class="panel channel-list">
+              <div class="table-head">
+                <span>平台</span><span>状态</span><span>开放</span>
+              </div>
+              <div id="channels-list"></div>
+            </div>
+            <aside id="channel-detail" class="panel detail-panel"></aside>
+          </div>
+        </section>
+        <section id="view-credentials" class="view hidden">
+          <div class="section-toolbar">
+            <div>
+              <h2>账号与凭据</h2>
+              <p class="muted">写入上游自己的凭据存储，重建容器后继续保留。</p>
+            </div>
+            <button id="refresh-credentials" class="secondary">
+              刷新保存状态
+            </button>
+          </div>
+          <div class="credentials-grid">
+            <section class="panel card-padding">
+              <div class="card-title">
+                <span class="small-icon">◇</span>
+                <div>
+                  <h3>API Token / Key</h3>
+                  <p class="muted">按服务配置，不为每个平台虚构 Token 字段。</p>
+                </div>
+              </div>
+              <form id="key-form">
+                <label for="key-type">凭据类型</label
+                ><select id="key-type">
+                  <option value="github-token">GitHub Token</option>
+                  <option value="groq-key">Groq API Key</option>
+                  <option value="openai-key">OpenAI API Key</option>
+                </select>
+                <div id="key-status" class="inline-status">尚未读取</div>
+                <label for="key-value">新凭据</label
+                ><input
+                  id="key-value"
+                  type="password"
+                  autocomplete="off"
+                  placeholder="输入后保存；不会提供查看原值"
+                />
+                <div class="form-actions">
+                  <button class="primary" type="submit">保存凭据</button
+                  ><button id="delete-key" type="button" class="danger-quiet">
+                    清除配置
+                  </button>
+                </div>
+              </form>
+            </section>
+            <section class="panel card-padding">
+              <div class="card-title">
+                <span class="small-icon">◎</span>
+                <div>
+                  <h3>平台会话</h3>
+                  <p class="muted">
+                    导入本站 Cookie，或在专用窗口由你本人登录。
+                  </p>
+                </div>
+              </div>
+              <label for="credential-channel">选择平台</label
+              ><select id="credential-channel"></select>
+              <div id="cookie-status" class="inline-status">尚未读取</div>
+              <div id="cookie-support" class="muted compact"></div>
+              <form id="cookie-form">
+                <label for="cookie-value">Cookie</label
+                ><textarea
+                  id="cookie-value"
+                  rows="5"
+                  spellcheck="false"
+                  autocomplete="off"
+                  placeholder="粘贴 Cookie 请求头，或 Cookie JSON 数组"
+                ></textarea>
+                <div class="form-actions wrap">
+                  <button id="import-cookie" class="primary" type="submit">
+                    导入 Cookie</button
+                  ><button id="open-login" class="secondary" type="button">
+                    准备并登录 ↗</button
+                  ><button id="clear-cookie" class="danger-quiet" type="button">
+                    退出平台
+                  </button>
+                </div>
+              </form>
+              <p class="field-help">
+                只处理所选平台的会话；保存成功不等于平台已验证。登录时其他查询会暂停，结束后恢复。
+              </p>
+            </section>
+          </div>
+        </section>
+        <section id="view-playground" class="view hidden">
+          <div class="section-toolbar">
+            <div>
+              <h2>只读操作台</h2>
+              <p class="muted">参数来自上游声明，执行范围由渠道策略控制。</p>
+            </div>
+            <button id="open-schema" class="secondary">查看 OpenAPI ↗</button>
+          </div>
+          <div class="playground-grid">
+            <form id="action-form" class="panel card-padding">
+              <label for="action-channel">平台</label
+              ><select id="action-channel"></select
+              ><label for="action-name">动作</label
+              ><select id="action-name"></select>
+              <div id="action-params"></div>
+              <button id="run-action" class="primary wide" type="submit">
+                执行只读动作 <span>→</span>
+              </button>
+              <p class="field-help">
+                转录会调用已配置的外部服务；仅在你明确需要处理该链接时执行。
+              </p>
+            </form>
+            <section class="panel result-panel">
+              <div class="result-header">
+                <h3>执行结果</h3>
+                <span id="result-status" class="badge">等待执行</span>
+              </div>
+              <pre id="action-result">选择平台与动作，结果将在这里显示。</pre>
+            </section>
+          </div>
+        </section>
+        <section class="task-section">
+          <div class="task-header">
+            <h2>管理任务</h2>
+            <span class="muted">当前会话 · 最近 30 条</span>
+          </div>
+          <div id="jobs-list" class="panel jobs-list">
+            <div class="empty-row">
+              还没有管理任务。读取状态或配置一个渠道开始。
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+    <dialog id="policy-dialog">
+      <form id="policy-form">
+        <div class="dialog-heading">
+          <div>
+            <span class="eyebrow">CHANNEL POLICY</span>
+            <h2 id="policy-title">渠道策略</h2>
+          </div>
+          <button
+            type="button"
+            class="icon-button close-dialog"
+            aria-label="关闭"
+          >
+            ×
+          </button>
+        </div>
+        <label for="policy-hosts">允许的 HTTPS 域名</label
+        ><textarea
+          id="policy-hosts"
+          rows="4"
+          spellcheck="false"
+          placeholder="每行一个精确域名，不含协议和路径"
+        ></textarea>
+        <p class="field-help">
+          这些是精确域名，不是正则。通用 Web 读取同样受此范围限制。
+        </p>
+        <label>开放的只读动作</label>
+        <div id="policy-actions" class="checkbox-grid"></div>
+        <div class="form-actions">
+          <button type="submit" class="primary">保存策略</button
+          ><button type="button" class="secondary close-dialog">取消</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="browser-dialog" class="browser-dialog">
+      <div class="dialog-heading">
+        <div>
+          <span class="eyebrow">PRIVATE LOGIN WINDOW</span>
+          <h2 id="browser-title">平台登录</h2>
+        </div>
+        <button class="icon-button" id="cancel-login" aria-label="结束登录">
+          ×
+        </button>
+      </div>
+      <div class="browser-toolbar">
+        <span class="live-dot"></span><span id="browser-url">正在准备…</span
+        ><button id="reload-browser" class="quiet">↻ 刷新</button>
+      </div>
+      <div
+        id="browser-stage"
+        class="browser-stage"
+        tabindex="0"
+        aria-label="专用登录浏览器，点击画面定位后输入"
+      >
+        <img id="browser-frame" alt="专用浏览器登录画面" />
+        <div id="browser-placeholder">正在准备浏览器与平台依赖…</div>
+      </div>
+      <div class="browser-controls">
+        <input
+          id="browser-text"
+          type="password"
+          autocomplete="off"
+          aria-label="向浏览器输入文字"
+          placeholder="先点击画面中的输入框，再输入文字"
+        /><button id="type-browser" class="secondary">输入</button
+        ><button id="tab-browser" class="quiet">Tab</button
+        ><button id="enter-browser" class="quiet">Enter</button
+        ><button id="finish-login" class="primary">保存会话并结束</button>
+      </div>
+      <p class="field-help">
+        你本人完成扫码或登录。输入不进入日志；已保存的凭据不会提供查看或导出。取消不会主动清除原有登录。
+      </p>
+    </dialog>
+    <div id="toast" role="status" class="toast hidden"></div>
+  </body>
+</html>

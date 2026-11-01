@@ -52,7 +52,14 @@ class Runner:
         # 错误或取消会中断原读取器；终止后排空剩余管道，避免 wait 被管道背压阻塞。
         await asyncio.gather(discard(proc.stdout), discard(proc.stderr), proc.wait())
 
-    async def run(self, args: list[str]) -> dict[str, Any]:
+    async def run(
+        self,
+        args: list[str],
+        *,
+        executable: str | None = None,
+        input_data: bytes | None = None,
+        execution_timeout: float | None = None,
+    ) -> dict[str, Any]:
         if self.closed:
             raise BridgeError("STOPPING", "服务正在停止", 503)
         try:
@@ -65,13 +72,19 @@ class Runner:
         try:
             if self.closed:
                 raise BridgeError("STOPPING", "服务正在停止", 503)
-            env = {k: v for k, v in os.environ.items() if k != "REACH_BRIDGE_TOKEN"}
+            env = {k: v for k, v in os.environ.items() if not k.startswith("REACH_BRIDGE_")}
+            if os.environ.get("REACH_BRIDGE_BROWSER_EXECUTABLE"):
+                env["REACH_BRIDGE_BROWSER_EXECUTABLE"] = os.environ[
+                    "REACH_BRIDGE_BROWSER_EXECUTABLE"
+                ]
             env["REACH_API_SUPERVISED"] = "1"
             try:
                 proc = await asyncio.create_subprocess_exec(
-                    self.settings.executable,
+                    executable or self.settings.executable,
                     *args,
-                    stdin=asyncio.subprocess.DEVNULL,
+                    stdin=asyncio.subprocess.PIPE
+                    if input_data is not None
+                    else asyncio.subprocess.DEVNULL,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     start_new_session=True,
@@ -101,10 +114,22 @@ class Runner:
                     stdout = group.create_task(read(proc.stdout, True))
                     group.create_task(read(proc.stderr, False))
                     group.create_task(proc.wait())
+                    if input_data is not None:
+
+                        async def feed():
+                            try:
+                                proc.stdin.write(input_data)
+                                await proc.stdin.drain()
+                            except (BrokenPipeError, ConnectionResetError):
+                                pass
+                            finally:
+                                proc.stdin.close()
+
+                        group.create_task(feed())
                 return stdout.result()
 
             try:
-                async with asyncio.timeout(self.settings.timeout):
+                async with asyncio.timeout(execution_timeout or self.settings.timeout):
                     output = await collect()
             except TimeoutError as exc:
                 raise BridgeError("TIMEOUT", "Agent-Reach 执行超过总时限", 504) from exc

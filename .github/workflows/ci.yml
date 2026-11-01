@@ -52,9 +52,11 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             test "$GITHUB_REF_NAME" = "v$version"
           fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "upstream=$upstream" >> "$GITHUB_OUTPUT"
-          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          {
+            echo "version=$version"
+            echo "upstream=$upstream"
+            echo "image=ghcr.io/${GITHUB_REPOSITORY,,}"
+          } >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v4
       - name: 编译当前架构镜像
         uses: docker/build-push-action@v7
@@ -80,12 +82,22 @@ jobs:
           resolved=$(docker compose --env-file upstream.env config --images)
           test "$resolved" = "$IMAGE:$VERSION-agent-reach-$UPSTREAM"
           docker run -d --name reach-bridge-test -e REACH_BRIDGE_TOKEN="$token" -p 127.0.0.1:8080:8080 reach-bridge:test
-          for attempt in $(seq 1 30); do
+          for _attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8080/readyz; then break; fi
             sleep 1
           done
           curl --fail-with-body http://127.0.0.1:8080/readyz
           curl --fail-with-body http://127.0.0.1:8080/v1/channels -H "Authorization: Bearer $token"
+      - name: 验证真实 Chromium、扩展与登录画布
+        timeout-minutes: 20
+        run: |
+          docker run --rm --init --name reach-bridge-browser-test \
+            --shm-size=512m \
+            --sysctl net.ipv4.ip_unprivileged_port_start=0 \
+            --add-host reach-bridge-smoke.test:127.0.0.1 \
+            --mount "type=bind,src=$PWD/scripts/browser_smoke.py,dst=/tmp/browser_smoke.py,readonly" \
+            reach-bridge:test \
+            /opt/uv-tools/agent-reach/bin/python /tmp/browser_smoke.py
       - name: 登录镜像仓库
         if: startsWith(github.ref, 'refs/tags/v')
         uses: docker/login-action@v4
@@ -119,6 +131,9 @@ jobs:
         run: |
           if docker container inspect reach-bridge-test >/dev/null 2>&1; then
             docker rm -f reach-bridge-test
+          fi
+          if docker container inspect reach-bridge-browser-test >/dev/null 2>&1; then
+            docker rm -f reach-bridge-browser-test
           fi
   release:
     if: startsWith(github.ref, 'refs/tags/v')

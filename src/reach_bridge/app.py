@@ -4,15 +4,19 @@ import asyncio
 import contextlib
 import hmac
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from .admin import mount_admin
+from .catalog import AccessGate, Catalog
 from .config import Settings, validate_url
 from .runner import BridgeError, Runner
 
@@ -37,6 +41,11 @@ class ReadInput(BaseModel):
     url: str = Field(min_length=1, max_length=2048)
 
 
+class ActionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    params: dict[str, Any] = Field(default_factory=dict, max_length=32)
+
+
 class ErrorResponse(BaseModel):
     error: dict[str, str]
 
@@ -57,7 +66,7 @@ class BodyLimit:
             if event["type"] == "http.disconnect":
                 return
             body.extend(event.get("body", b""))
-            if len(body) > 16384:
+            if len(body) > (131072 if scope["path"] == "/admin/api/cookies" else 16384):
                 await JSONResponse({"error": {"code": "BODY_TOO_LARGE"}}, 413)(scope, receive, send)
                 return
             if not event.get("more_body", False):
@@ -74,11 +83,37 @@ class BodyLimit:
         await self.app(scope, replay, send)
 
 
+class SecurityHeaders:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        async def secured(event):
+            if event["type"] == "http.response.start":
+                event["headers"] = [
+                    *event.get("headers", []),
+                    (b"cache-control", b"no-store"),
+                    (b"x-content-type-options", b"nosniff"),
+                    (b"referrer-policy", b"no-referrer"),
+                    (b"cross-origin-resource-policy", b"same-origin"),
+                    (
+                        b"content-security-policy",
+                        b"default-src 'self'; script-src 'self'; style-src 'self'; "
+                        b"img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; "
+                        b"frame-ancestors 'none'; form-action 'self'",
+                    ),
+                ]
+            await send(event)
+
+        await self.app(scope, receive, secured)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
-    policies = settings.policies()
+    catalog = Catalog(settings)
+    policies = catalog.policies
     runner = Runner(settings)
-    catalog: dict[str, dict] = {}
+    gate = AccessGate()
     version = ""
     ready = False
 
@@ -91,23 +126,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if not info["ok"] or not channels["ok"]:
                 raise RuntimeError("Agent-Reach 启动检查失败")
             version = info["result"]["version"]
-            for channel in channels["channels"]:
-                if channel["name"] in policies:
-                    catalog[channel["name"]] = channel
-            missing = policies.keys() - catalog.keys()
-            if missing:
-                raise RuntimeError(
-                    "配置的渠道不在当前 Agent-Reach 中：" + ", ".join(sorted(missing))
-                )
+            catalog.load(version, channels["channels"])
             ready = True
             yield
         finally:
             ready = False
+            await manager.close()
             await runner.close()
 
     app = FastAPI(
         title="Reach-Bridge",
-        version="0.1.0",
+        version="0.2.0",
         lifespan=lifespan,
         docs_url=None,
         redoc_url=None,
@@ -115,7 +144,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         responses={422: {"model": ErrorResponse}},
     )
     app.add_middleware(BodyLimit)
+    app.add_middleware(SecurityHeaders)
     app.state.runner = runner
+    manager, admin_auth = mount_admin(app, settings, runner, catalog, gate)
+    web = Path(__file__).with_name("web")
+    app.mount("/assets", StaticFiles(directory=web), name="assets")
+
+    @app.get("/", include_in_schema=False)
+    async def index():
+        return FileResponse(web / "index.html")
+
     bearer = HTTPBearer(auto_error=False)
 
     def authenticate(
@@ -164,31 +202,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/v1/channels", dependencies=auth)
     async def channels():
-        return {
-            "agent_reach_version": version,
-            "channels": [
-                {
-                    "name": name,
-                    "description": row["description"],
-                    "actions": [
-                        a["name"] for a in row["actions"] if a["name"] in ("search", "read")
-                    ],
-                    "hosts": policies[name].hosts,
-                }
-                for name, row in catalog.items()
-            ],
-        }
+        return catalog.describe()
 
     def action_for(platform: str, action: str) -> dict:
-        if platform not in catalog:
-            raise HTTPException(403, "未启用该平台")
-        for item in catalog[platform]["actions"]:
-            if item["name"] == action:
-                return item
-        raise HTTPException(422, "该平台不支持此动作")
+        return catalog.action(platform, action)
 
     async def execute(request: Request, args: list[str]) -> Any:
-        task = asyncio.create_task(runner.run(args))
+        async def query():
+            async with gate.query():
+                return await runner.run(args)
+
+        task = asyncio.create_task(query())
 
         async def disconnected():
             while True:
@@ -251,6 +275,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return await execute(
             request, [body.platform, "read", "--timeout", str(settings.timeout), "--", url]
         )
+
+    @app.post("/v1/actions/{platform}/{action}", dependencies=auth)
+    async def action(platform: str, action: str, body: ActionInput, request: Request):
+        return await execute(request, catalog.build_args(platform, action, body.params))
+
+    @app.post("/admin/api/actions/{platform}/{action}")
+    async def admin_action(platform: str, action: str, body: ActionInput, request: Request):
+        admin_auth.require(request)
+        return await execute(request, catalog.build_args(platform, action, body.params))
 
     return app
 
