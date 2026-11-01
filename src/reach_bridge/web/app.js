@@ -179,7 +179,7 @@ function renderChannels() {
       renderChannels();
     });
     row.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
+      if (e.key === "Enter" && e.target === row) {
         state.selected = channel.name;
         renderChannels();
       }

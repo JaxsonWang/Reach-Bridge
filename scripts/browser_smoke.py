@@ -175,6 +175,18 @@ def diagnose_pipe(chrome, extension):
 def browser_diagnostics(upstream, directory):
     """失败诊断不是重试验收；无论诊断结果如何，调用方仍抛出原失败。"""
     chrome = "/usr/bin/chromium"
+    for name in (
+        "/proc/self/attr/current",
+        "/proc/sys/user/max_user_namespaces",
+        "/proc/sys/kernel/unprivileged_userns_clone",
+        "/proc/sys/kernel/apparmor_restrict_unprivileged_userns",
+    ):
+        path = Path(name)
+        try:
+            value = path.read_text(encoding="utf-8").strip()[:200]
+        except OSError as error:
+            value = "unavailable:" + type(error).__name__
+        print("NAMESPACE_POLICY=" + json.dumps({"path": name, "value": value}), flush=True)
     extension = upstream.browser.extension_dir()
     manifest = extension / "manifest.json"
     if manifest.is_file():

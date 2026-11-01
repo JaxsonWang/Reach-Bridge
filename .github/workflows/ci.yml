@@ -93,6 +93,7 @@ jobs:
         run: |
           docker run --rm --init --name reach-bridge-browser-test \
             --shm-size=512m \
+            --security-opt "seccomp=$PWD/docker/chromium-seccomp.json" \
             --sysctl net.ipv4.ip_unprivileged_port_start=0 \
             --add-host reach-bridge-smoke.test:127.0.0.1 \
             --mount "type=bind,src=$PWD/scripts/browser_smoke.py,dst=/tmp/browser_smoke.py,readonly" \
