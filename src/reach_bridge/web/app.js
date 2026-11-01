@@ -372,12 +372,27 @@ async function refreshCredentials() {
 }
 function renderCredentialState() {
   const key = $("key-type").value;
+  $("key-official").href = {
+    "github-token": "https://github.com/settings/tokens",
+    "groq-key": "https://console.groq.com/keys",
+    "openai-key": "https://platform.openai.com/api-keys",
+  }[key];
   $("key-status").textContent = state.credentials.keys?.[key]
     ? "已配置 · 原值不回显"
     : "尚未配置";
   const platform = $("credential-channel").value;
   const auth = state.capabilities[platform] || {};
   const saved = state.credentials.channels?.[platform] || {};
+  const official = $("site-official");
+  official.classList.add("hidden");
+  official.removeAttribute("href");
+  if (auth.login_url) {
+    const url = new URL(auth.login_url);
+    if (url.protocol === "https:" && !url.username && !url.password) {
+      official.href = url.href;
+      official.classList.remove("hidden");
+    }
+  }
   $("cookie-status").textContent = saved.saved
     ? saved.verified
       ? "已保存 · 上次认证验证通过"

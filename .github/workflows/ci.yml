@@ -96,6 +96,8 @@ jobs:
           echo "::add-mask::$token"
           echo "::add-mask::$admin"
           docker run -d --name reach-bridge-native-test \
+            --user 1026:100 \
+            --tmpfs /data/home:uid=1026,gid=100,mode=0700 \
             -e REACH_BRIDGE_TOKEN="$token" \
             -e REACH_BRIDGE_ADMIN_TOKEN="$admin" \
             -e REACH_BRIDGE_BROWSER_ENABLED=false \

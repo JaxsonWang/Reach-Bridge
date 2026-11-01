@@ -5,6 +5,7 @@ import json
 import os
 import signal
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -20,6 +21,15 @@ PROFILE = Path(os.environ.get("HOME", "/data/home")) / ".agent-reach/browser/pro
 def require(condition, message):
     if not condition:
         raise RuntimeError(message)
+
+
+def native_identity():
+    require(os.getuid() == 1026 and os.getgid() == 100, "原生验收须以 NAS UID/GID 1026:100 运行")
+    home = Path(os.environ["HOME"])
+    # 只创建和清理本次探针，不修改 HOME 属主、权限或现有文件。
+    with tempfile.TemporaryFile(dir=home) as probe:
+        probe.write(b"native-home-write-check")
+        probe.flush()
 
 
 def serve():
@@ -201,6 +211,8 @@ def check():
 
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "check"
+    if mode in {"serve", "check"}:
+        native_identity()
     if mode == "serve":
         serve()
     elif mode == "cli":

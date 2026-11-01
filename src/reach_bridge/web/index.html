@@ -173,6 +173,13 @@
                   <option value="openai-key">OpenAI API Key</option>
                 </select>
                 <div id="key-status" class="inline-status">尚未读取</div>
+                <a
+                  id="key-official"
+                  class="external-link"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  >打开官方凭据页面 ↗</a
+                >
                 <label for="key-value">新凭据</label
                 ><input
                   id="key-value"
@@ -202,6 +209,31 @@
               ><select id="credential-channel"></select>
               <div id="cookie-status" class="inline-status">尚未读取</div>
               <div id="cookie-support" class="muted compact"></div>
+              <a
+                id="site-official"
+                class="secondary external-link hidden"
+                target="_blank"
+                rel="noopener noreferrer"
+                >在本机打开官方登录页 ↗</a
+              >
+              <details class="cookie-help">
+                <summary>在本机浏览器获取 Cookie</summary>
+                <ol>
+                  <li>打开官方页面，由你本人登录；B 站可使用 App 扫码。</li>
+                  <li>
+                    按 F12（Mac 可按 ⌥⌘I），在 Network
+                    刷新页面，选择发往本站的请求。
+                  </li>
+                  <li>
+                    复制 Request Headers 中 Cookie 的值，回到这里粘贴。也可在
+                    Application → Cookies 查看，或导出本站 Cookie JSON 数组。
+                  </li>
+                </ol>
+                <p>
+                  document.cookie 会漏掉 HttpOnly Cookie。不要上传 HAR、整段
+                  cURL 或其他站点的 Cookie，也不要把凭据发到聊天里。
+                </p>
+              </details>
               <form id="cookie-form">
                 <label for="cookie-value">Cookie</label
                 ><textarea

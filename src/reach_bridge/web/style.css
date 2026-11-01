@@ -1189,3 +1189,29 @@ dialog::backdrop {
   border: 1px solid #d2e6d8;
   color: #426b51;
 }
+
+.external-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--green);
+  text-decoration: none;
+  font-size: 13px;
+  margin-top: 13px;
+}
+.cookie-help {
+  margin-top: 16px;
+  font-size: 12px;
+  line-height: 1.9;
+  color: var(--muted);
+}
+.cookie-help summary {
+  cursor: pointer;
+  color: #426b51;
+}
+.cookie-help ol {
+  padding-left: 19px;
+}
+.cookie-help p {
+  margin-top: 8px;
+}
