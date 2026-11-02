@@ -20,6 +20,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && mkdir -p /data/home /tmp/.X11-unix \
     && chmod 1777 /tmp/.X11-unix \
     && chown 1000:1000 /data/home
+COPY docker/patches/agent-reach-1.6.1-cdp-opener.patch /tmp/reach-bridge-cdp.patch
+RUN if [ "$AGENT_REACH_VERSION" = "1.6.1" ]; then \
+      cd /opt/uv-tools/agent-reach/lib/python3.12/site-packages \
+      && test "$(/opt/uv-tools/agent-reach/bin/python -c 'import agent_reach; print(agent_reach.__version__)')" = "1.6.1" \
+      && git apply --check /tmp/reach-bridge-cdp.patch \
+      && git apply /tmp/reach-bridge-cdp.patch; \
+    else echo "CDP opener 补丁仅适用于 Agent-Reach 1.6.1，其他版本保持原包"; fi \
+    && rm /tmp/reach-bridge-cdp.patch
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
@@ -28,5 +36,6 @@ COPY config ./config
 COPY docker/entrypoint.py /usr/local/bin/reach-bridge-entrypoint.py
 USER 1000:1000
 EXPOSE 8080
+HEALTHCHECK --interval=10s --timeout=5s --retries=6 --start-period=10s CMD ["reach-bridge-healthcheck"]
 ENTRYPOINT ["python", "/usr/local/bin/reach-bridge-entrypoint.py"]
 CMD ["reach-bridge"]

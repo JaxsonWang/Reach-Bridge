@@ -87,6 +87,7 @@ jobs:
             sleep 1
           done
           curl --fail-with-body http://127.0.0.1:8080/readyz
+          docker exec reach-bridge-test reach-bridge-healthcheck
           curl --fail-with-body http://127.0.0.1:8080/v1/channels -H "Authorization: Bearer $token"
           docker exec reach-bridge-test python -c '
           from pathlib import Path
@@ -120,6 +121,11 @@ jobs:
             --mount "type=bind,src=$PWD/scripts/native_smoke.py,dst=/tmp/native_smoke.py,readonly" \
             reach-bridge:test python /tmp/native_smoke.py serve
           docker exec reach-bridge-native-test python /tmp/native_smoke.py check
+      - name: 验证 CDP 客户端 CPU 与故障语义
+        run: |
+          docker run --rm -e REACH_BRIDGE_BROWSER_ENABLED=false \
+            --mount "type=bind,src=$PWD/scripts/cpu_smoke.py,dst=/tmp/cpu_smoke.py,readonly" \
+            reach-bridge:test /opt/uv-tools/agent-reach/bin/python /tmp/cpu_smoke.py
       - name: 验证真实 Chromium、扩展与登录画布
         timeout-minutes: 20
         run: |

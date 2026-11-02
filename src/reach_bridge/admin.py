@@ -329,7 +329,7 @@ def mount_admin(app, settings: Settings, runner: Runner, catalog: Catalog, gate:
             "browser_sandbox": settings.browser_sandbox,
             "origin": auth.origin,
             "insecure_http": settings.allow_insecure_http,
-            "version": "0.3.1",
+            "version": "0.3.2",
         }
 
     @router.post("/login")
@@ -340,7 +340,7 @@ def mount_admin(app, settings: Settings, runner: Runner, catalog: Catalog, gate:
                 "csrf": session.csrf,
                 "origin": auth.origin,
                 "insecure_http": settings.allow_insecure_http,
-                "version": "0.3.1",
+                "version": "0.3.2",
             }
         )
         response.set_cookie(
@@ -370,7 +370,7 @@ def mount_admin(app, settings: Settings, runner: Runner, catalog: Catalog, gate:
             "csrf": auth.sessions[key].csrf,
             "origin": auth.origin,
             "insecure_http": settings.allow_insecure_http,
-            "version": "0.3.1",
+            "version": "0.3.2",
         }
 
     @router.get("/api/channels")

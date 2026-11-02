@@ -18,7 +18,7 @@ docker compose --env-file .env --env-file upstream.env up -d --no-build --wait
 
 默认仅绑定 `127.0.0.1:8080`，适合反向代理提供 HTTPS。需要私网直连时修改 `REACH_BRIDGE_BIND` 和 `REACH_BRIDGE_PORT`，并限制宿主入站访问。不要把明文 HTTP 暴露到公网。
 
-固定镜像：`ghcr.io/jaxsonwang/reach-bridge:0.3.1-agent-reach-1.6.1`。发布包同时提供分架构 `.tar.gz` 离线镜像，可用 `docker load -i <镜像文件>` 导入后跳过 `pull`。
+固定镜像：`ghcr.io/jaxsonwang/reach-bridge:0.3.2-agent-reach-1.6.1`。发布包同时提供分架构 `.tar.gz` 离线镜像，可用 `docker load -i <镜像文件>` 导入后跳过 `pull`。
 
 ### 启用 WebUI 管理
 
@@ -97,6 +97,14 @@ docker top <容器名> -eo pid,ppid,comm,rss,pcpu
 ```
 
 `docker top` 的 RSS 单位为 KiB，包含共享映射，不能简单相加作为容器总量。Linux 下 Docker CLI 会扣除部分非活跃文件缓存，但活跃文件缓存仍可能计入显示值；高读数不一定是 Python 匿名内存增长。`shm_size: 512m` 是容量上限，不是预先占用。默认部署更新后可检查空闲时不再存在 Xvfb；实际内存降幅取决于进程和文件缓存，不能用旧 Xvfb 的 RSS 直接推算。不清理宿主缓存，不自动添加内存硬限制。
+
+### 降低浏览器待机 CPU
+
+0.3.2 镜像内的 Agent-Reach 1.6.1 带有 CDP 客户端复用补丁：同一进程首次请求时构造客户端，后续回环 HTTP 请求不再重复初始化 TLS 上下文和加载默认 CA。每次仍实际请求并解析新响应；代理禁用、请求超时和故障返回方式保持不变。watcher 的 2 秒轮询、周期会话保存和 600 秒空闲回收均不变。
+
+补丁位于 `docker/patches/agent-reach-1.6.1-cdp-opener.patch`，构建时检查安装版本和补丁匹配，目标源码不匹配则构建失败。只对 1.6.1 应用，其他上游版本保持原包，不能据此假定它们有相同 CPU 优化。单独安装桥接 Python wheel 不会修改外部 Agent-Reach。CDP 客户端在进程内复用其 TLS 上下文；这是本机 CDP 路径的生命周期变化，不修改访问平台网站的证书校验。
+
+健康检查统一使用 `reach-bridge-healthcheck`，只通过本机 HTTP 检查 `/readyz`，不加载 TLS 信任库或 FastAPI。10 秒探测间隔、3 秒请求超时及原就绪判定不变。镜像已内置该检查；已有自定义 Compose 若覆盖了 `healthcheck`，将 `test` 改为 `["CMD", "reach-bridge-healthcheck"]`，保留原有间隔等设置。
 
 ### 从 0.1 升级
 

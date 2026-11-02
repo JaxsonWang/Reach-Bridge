@@ -1,7 +1,7 @@
 name: reach-bridge
 services:
   reach-bridge:
-    image: ghcr.io/jaxsonwang/reach-bridge:${REACH_BRIDGE_VERSION:-0.3.1}-agent-reach-${AGENT_REACH_VERSION:?请加载 upstream.env}
+    image: ghcr.io/jaxsonwang/reach-bridge:${REACH_BRIDGE_VERSION:-0.3.2}-agent-reach-${AGENT_REACH_VERSION:?请加载 upstream.env}
     init: true
     restart: unless-stopped
     user: "${PUID:-1000}:${PGID:-1000}"
@@ -27,7 +27,7 @@ services:
     shm_size: 512m
     stop_grace_period: 10s
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/readyz', timeout=3)"]
+      test: ["CMD", "reach-bridge-healthcheck"]
       interval: 10s
       timeout: 5s
       retries: 6

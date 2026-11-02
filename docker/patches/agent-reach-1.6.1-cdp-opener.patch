@@ -1,0 +1,26 @@
+--- a/agent_reach/runtime/cdp.py
++++ b/agent_reach/runtime/cdp.py
+@@ -8,6 +8,7 @@
+ from __future__ import annotations
+ 
+ import base64
++import functools
+ import hashlib
+ import json
+ import os
+@@ -24,8 +25,14 @@
+ _TIMEOUT = 5
+ 
+ 
++@functools.lru_cache(maxsize=1)
++def _json_opener():
++    # CDP 轮询复用客户端，避免每次回环 HTTP 请求都重新创建 TLS 上下文和加载 CA。
++    return urllib.request.build_opener(urllib.request.ProxyHandler({}))
++
++
+ def _json(path: str):
+-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # loopback: never proxy
++    opener = _json_opener()
+     try:
+         with opener.open(f"{CDP_URL}{path}", timeout=_TIMEOUT) as resp:
+             return json.loads(resp.read())

@@ -309,6 +309,7 @@ def exercise(helper, upstream, channel):
     )
     assert upstream.browser.status()["opencli_connected"] is True
     assert not displays(), "无头浏览器准备不应启动 Xvfb"
+    measure_watcher_cpu(upstream)
     print("打开受控 HTTPS 登录画布", flush=True)
     opened = helper.execute("browser_login", channel.name, {}, upstream)
     assert len(displays()) == 1, "可见登录浏览器应有一个按需 Xvfb"
@@ -408,6 +409,41 @@ def displays():
         if name == "Xvfb" and "State:\tZ" not in status:
             result.append(int(entry.name))
     return result
+
+
+def measure_watcher_cpu(upstream):
+    processes = []
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            args = (entry / "cmdline").read_bytes().split(b"\0")
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        if b"agent_reach.runtime.browser_watcher" in args:
+            processes.append(entry)
+    assert len(processes) == 1, "验收容器应只有一个浏览器 watcher"
+    process = processes[0]
+
+    def ticks():
+        fields = (process / "stat").read_text().rsplit(")", 1)[1].split()
+        return int(fields[11]) + int(fields[12])
+
+    snapshot = upstream.browser.browser_root() / "session.json"
+    before_save = snapshot.stat().st_mtime_ns
+    before_ticks, started = ticks(), time.monotonic()
+    time.sleep(6)
+    cpu = (ticks() - before_ticks) / os.sysconf("SC_CLK_TCK")
+    elapsed = time.monotonic() - started
+    assert snapshot.stat().st_mtime_ns > before_save, "优化不能停止原来的周期会话保存"
+    assert upstream.browser.IDLE_LIMIT == 600
+    print(
+        "WATCHER_CPU="
+        + json.dumps(
+            {"window_seconds": elapsed, "cpu_seconds": cpu, "one_core_percent": cpu / elapsed * 100}
+        ),
+        flush=True,
+    )
 
 
 def exercise_display_cleanup(upstream):
